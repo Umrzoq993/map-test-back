@@ -112,6 +112,7 @@ public class FacilityController {
                 .lng(f.getLng())
                 .zoom(f.getZoom())
                 .attributes(f.getAttributes())
+                .geometry(f.getGeometry())
                 .build();
     }
 }
