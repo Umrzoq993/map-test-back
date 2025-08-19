@@ -18,4 +18,5 @@ public class FacilityPutReq {
     private Double lng;
     private Integer zoom;
     private JsonNode attributes;
+    private JsonNode geometry;
 }

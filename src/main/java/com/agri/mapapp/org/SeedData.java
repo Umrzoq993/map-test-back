@@ -10,24 +10,59 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 public class SeedData {
-    // SeedData.java ichida, org'lar yaratilgandan keyin:
-    @Bean CommandLineRunner seedFacilities(FacilityRepository fRepo, OrganizationUnitRepository orgRepo) {
+    @Bean
+    CommandLineRunner seed(OrganizationUnitRepository repo) {
         return args -> {
-            if (fRepo.count() > 0) return;
-            var hq = orgRepo.findAll().stream().findFirst().orElse(null);
-            if (hq == null) return;
+            if (repo.count() > 0) return;
 
-            fRepo.save(Facility.builder()
-                    .org(hq).name("HQ Issiqxona 1")
-                    .type(FacilityType.GREENHOUSE).status(FacilityStatus.ACTIVE)
-                    .lat(41.312).lng(69.28).zoom(15)
-                    .build());
+            // HQ
+            OrganizationUnit hq = repo.save(OrganizationUnit.builder()
+                    .name("Markaziy Boshqarma (HQ)")
+                    .lat(41.3111).lng(69.2797).zoom(13)
+                    .sortOrder(1).build());
 
-            fRepo.save(Facility.builder()
-                    .org(hq).name("HQ Molxona A")
-                    .type(FacilityType.COWSHED).status(FacilityStatus.ACTIVE)
-                    .lat(41.309).lng(69.275).zoom(15)
-                    .build());
+            repo.save(OrganizationUnit.builder()
+                    .name("IT bo'limi").parent(hq)
+                    .lat(41.3275).lng(69.2817).zoom(14)
+                    .sortOrder(1).build());
+
+            repo.save(OrganizationUnit.builder()
+                    .name("Operatsiyalar bo'limi").parent(hq)
+                    .lat(41.3059).lng(69.2690).zoom(14)
+                    .sortOrder(2).build());
+
+            // Hududiy filiallar (root node sifatida)
+            OrganizationUnit regions = repo.save(OrganizationUnit.builder()
+                    .name("Hududiy Filiallar")
+                    .sortOrder(2).build());
+
+            OrganizationUnit t = repo.save(OrganizationUnit.builder()
+                    .name("Toshkent filiali").parent(regions)
+                    .lat(41.2995).lng(69.2401).zoom(13)
+                    .sortOrder(1).build());
+
+            repo.save(OrganizationUnit.builder()
+                    .name("Chilonzor bo'limi").parent(t)
+                    .lat(41.2856).lng(69.2033).zoom(14).build());
+
+            repo.save(OrganizationUnit.builder()
+                    .name("Yunusobod bo'limi").parent(t)
+                    .lat(41.3634).lng(69.2862).zoom(14).build());
+
+            repo.save(OrganizationUnit.builder()
+                    .name("Samarqand filiali").parent(regions)
+                    .lat(39.6542).lng(66.9597).zoom(13)
+                    .sortOrder(2).build());
+
+            repo.save(OrganizationUnit.builder()
+                    .name("Buxoro filiali").parent(regions)
+                    .lat(39.7747).lng(64.4286).zoom(13)
+                    .sortOrder(3).build());
+
+            repo.save(OrganizationUnit.builder()
+                    .name("Farg‘ona filiali").parent(regions)
+                    .lat(40.3890).lng(71.7843).zoom(13)
+                    .sortOrder(4).build());
         };
     }
 

@@ -18,4 +18,5 @@ public class FacilityPatchReq {
     private Double lng;
     private Integer zoom;
     private JsonNode attributes; // merge qilamiz (deep merge)
+    private JsonNode geometry;
 }
