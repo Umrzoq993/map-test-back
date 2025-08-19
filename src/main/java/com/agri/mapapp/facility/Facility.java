@@ -48,6 +48,11 @@ public class Facility {
     @Column(columnDefinition = "jsonb")
     private JsonNode attributes;
 
+    /** Chizilgan geometriya (GeoJSON: Point/Polygon/Rectangle) */
+    @Type(JsonType.class)
+    @Column(columnDefinition = "jsonb")
+    private JsonNode geometry;   // ixtiyoriy: null bo'lishi mumkin
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 

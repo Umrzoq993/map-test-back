@@ -35,6 +35,7 @@ public class FacilityService {
                 .status(req.getStatus() == null ? FacilityStatus.ACTIVE : req.getStatus())
                 .lat(req.getLat()).lng(req.getLng()).zoom(req.getZoom())
                 .attributes(req.getAttributes())
+                .geometry(req.getGeometry())
                 .build();
 
         f = repo.save(f);
@@ -55,6 +56,7 @@ public class FacilityService {
         f.setLng(req.getLng());
         f.setZoom(req.getZoom());
         f.setAttributes(req.getAttributes());
+        f.setGeometry(req.getGeometry());
 
         return toRes(f);
     }
@@ -74,6 +76,7 @@ public class FacilityService {
         if (req.getLat() != null) f.setLat(req.getLat());
         if (req.getLng() != null) f.setLng(req.getLng());
         if (req.getZoom() != null) f.setZoom(req.getZoom());
+        if (req.getGeometry() != null) f.setGeometry(req.getGeometry());
         if (req.getAttributes() != null) {
             JsonNode merged = deepMerge(f.getAttributes(), req.getAttributes());
             f.setAttributes(merged);
@@ -99,6 +102,7 @@ public class FacilityService {
                 .lng(f.getLng())
                 .zoom(f.getZoom())
                 .attributes(f.getAttributes())
+                .geometry(f.getGeometry())
                 .build();
     }
 
