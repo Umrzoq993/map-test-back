@@ -17,10 +17,9 @@ import java.util.stream.Collectors;
 public class FacilityController {
 
     private final FacilityRepository repo;
-    private final OrganizationUnitRepository orgRepo; // hozircha kerak bo'lmasa ham qoldirdik
+    private final OrganizationUnitRepository orgRepo;
     private final FacilityService service;
 
-    // ===== LIST (multi-type + bbox) =====
     @GetMapping
     public List<FacilityRes> list(
             @RequestParam(required = false) Long orgId,
@@ -30,7 +29,6 @@ public class FacilityController {
             @RequestParam(required = false) String bbox,
             @RequestParam(required = false) String q
     ) {
-        // bbox parse: "minLng,minLat,maxLng,maxLat"
         Double minLat = null, maxLat = null, minLng = null, maxLng = null;
         if (bbox != null && !bbox.isBlank()) {
             String[] parts = bbox.split(",");
@@ -42,7 +40,6 @@ public class FacilityController {
             }
         }
 
-        // types parse (CSV yoki legacy "type")
         List<FacilityType> types = null;
         if (typesCsv != null && !typesCsv.isBlank()) {
             types = Arrays.stream(typesCsv.split(","))
@@ -51,50 +48,39 @@ public class FacilityController {
                     .map(String::toUpperCase)
                     .map(FacilityType::valueOf)
                     .collect(Collectors.toList());
-        } else if (type != null) {
-            types = List.of(type);
-        }
+        } else if (type != null) types = List.of(type);
 
-        // q ni oldindan lower + patternga aylantiramiz
         String qPattern = (q == null || q.isBlank())
                 ? null
                 : "%" + q.toLowerCase(Locale.ROOT) + "%";
 
-        List<Facility> list;
-        if (types != null && !types.isEmpty()) {
-            list = repo.searchWithTypes(orgId, types, status, minLat, maxLat, minLng, maxLng, qPattern);
-        } else {
-            list = repo.searchNoType(orgId, status, minLat, maxLat, minLng, maxLng, qPattern);
-        }
+        List<Facility> list = (types != null && !types.isEmpty())
+                ? repo.searchWithTypes(orgId, types, status, minLat, maxLat, minLng, maxLng, qPattern)
+                : repo.searchNoType(orgId, status, minLat, maxLat, minLng, maxLng, qPattern);
 
         return list.stream().map(this::toRes).toList();
     }
 
-    // ===== READ BY ID =====
     @GetMapping("/{id}")
     public FacilityRes getById(@PathVariable Long id) {
         return service.get(id);
     }
 
-    // ===== CREATE =====
     @PostMapping
     public ResponseEntity<FacilityRes> create(@Valid @RequestBody FacilityCreateReq req) {
         return ResponseEntity.ok(service.create(req));
     }
 
-    // ===== PUT (REPLACE) =====
     @PutMapping("/{id}")
     public FacilityRes put(@PathVariable Long id, @Valid @RequestBody FacilityPutReq req) {
         return service.put(id, req);
     }
 
-    // ===== PATCH (PARTIAL UPDATE) =====
     @PatchMapping("/{id}")
     public FacilityRes patch(@PathVariable Long id, @RequestBody FacilityPatchReq req) {
         return service.patch(id, req);
     }
 
-    // ===== DELETE =====
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         service.delete(id);
@@ -111,7 +97,7 @@ public class FacilityController {
                 .lat(f.getLat())
                 .lng(f.getLng())
                 .zoom(f.getZoom())
-                .attributes(f.getAttributes())
+                .attributes(f.getAttributes()) // <-- frontga "details" deb chiqadi
                 .geometry(f.getGeometry())
                 .build();
     }

@@ -1,6 +1,7 @@
 package com.agri.mapapp.facility;
 
 import com.agri.mapapp.facility.dto.*;
+import com.agri.mapapp.facility.validation.FacilityAttributesValidator;
 import com.agri.mapapp.org.OrganizationUnit;
 import com.agri.mapapp.org.OrganizationUnitRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -16,6 +17,7 @@ public class FacilityService {
 
     private final FacilityRepository repo;
     private final OrganizationUnitRepository orgRepo;
+    private final FacilityAttributesValidator validator;
 
     @Transactional(readOnly = true)
     public FacilityRes get(Long id) {
@@ -27,6 +29,9 @@ public class FacilityService {
     public FacilityRes create(FacilityCreateReq req) {
         OrganizationUnit org = orgRepo.findById(req.getOrgId())
                 .orElseThrow(() -> new IllegalArgumentException("Org not found: " + req.getOrgId()));
+
+        // type ga mos attributes ni tekshiramiz
+        validator.validate(req.getType(), req.getAttributes());
 
         Facility f = Facility.builder()
                 .org(org)
@@ -47,6 +52,9 @@ public class FacilityService {
         Facility f = repo.findById(id).orElseThrow(() -> new EntityNotFoundException("Facility not found: " + id));
         OrganizationUnit org = orgRepo.findById(req.getOrgId())
                 .orElseThrow(() -> new IllegalArgumentException("Org not found: " + req.getOrgId()));
+
+        // type ga mos attributes tekshiruvi
+        validator.validate(req.getType(), req.getAttributes());
 
         f.setOrg(org);
         f.setName(req.getName());
@@ -82,6 +90,9 @@ public class FacilityService {
             f.setAttributes(merged);
         }
 
+        // PATCHdan keyin ham aktual holatni type bo‘yicha tekshirib qo‘yish foydali
+        validator.validate(f.getType(), f.getAttributes());
+
         return toRes(f);
     }
 
@@ -101,7 +112,7 @@ public class FacilityService {
                 .lat(f.getLat())
                 .lng(f.getLng())
                 .zoom(f.getZoom())
-                .attributes(f.getAttributes())
+                .attributes(f.getAttributes()) // Frontendga "details" nomida chiqadi
                 .geometry(f.getGeometry())
                 .build();
     }
@@ -124,7 +135,6 @@ public class FacilityService {
             });
             return t;
         }
-        // agar obyekt bo‘lmasa, yangisini qaytaramiz
         return updates;
     }
 }
