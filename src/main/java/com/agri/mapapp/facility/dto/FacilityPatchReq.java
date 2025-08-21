@@ -2,8 +2,9 @@ package com.agri.mapapp.facility.dto;
 
 import com.agri.mapapp.facility.FacilityStatus;
 import com.agri.mapapp.facility.FacilityType;
-import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.*;
 
 @Getter
@@ -17,6 +18,10 @@ public class FacilityPatchReq {
     private Double lat;
     private Double lng;
     private Integer zoom;
-    private JsonNode attributes; // merge qilamiz (deep merge)
+
+    /** PATCH ham "details" yoki "attributes" qabul qila oladi */
+    @JsonAlias({"details", "attributes"})
+    private JsonNode attributes; // deep-merge
+
     private JsonNode geometry;
 }
