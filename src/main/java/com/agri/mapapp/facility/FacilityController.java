@@ -91,6 +91,7 @@ public class FacilityController {
         return FacilityRes.builder()
                 .id(f.getId())
                 .orgId(f.getOrg().getId())
+                .orgName(f.getOrg().getName())
                 .name(f.getName())
                 .type(f.getType())
                 .status(f.getStatus())
@@ -99,6 +100,8 @@ public class FacilityController {
                 .zoom(f.getZoom())
                 .attributes(f.getAttributes()) // <-- frontga "details" deb chiqadi
                 .geometry(f.getGeometry())
+                .createdAt(f.getCreatedAt() != null ? f.getCreatedAt().toString() : null)
+                .updatedAt(f.getUpdatedAt() != null ? f.getUpdatedAt().toString() : null)
                 .build();
     }
 }

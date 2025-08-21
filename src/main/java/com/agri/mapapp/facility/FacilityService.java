@@ -106,6 +106,7 @@ public class FacilityService {
         return FacilityRes.builder()
                 .id(f.getId())
                 .orgId(f.getOrg().getId())
+                .orgName(f.getOrg().getName())
                 .name(f.getName())
                 .type(f.getType())
                 .status(f.getStatus())
@@ -114,6 +115,8 @@ public class FacilityService {
                 .zoom(f.getZoom())
                 .attributes(f.getAttributes()) // Frontendga "details" nomida chiqadi
                 .geometry(f.getGeometry())
+                .createdAt(f.getCreatedAt() != null ? f.getCreatedAt().toString() : null)
+                .updatedAt(f.getUpdatedAt() != null ? f.getUpdatedAt().toString() : null)
                 .build();
     }
 

@@ -1,20 +1,17 @@
 package com.agri.mapapp.facility;
 
 public enum FacilityType {
+    // 9 ta sahifa uchun kerak bo'lgan turlar
     GREENHOUSE,     // Issiqxona
-    POULTRY,        // Tovuqxona (go'sht/tuxum)
+    POULTRY,        // Tovuqxona
     COWSHED,        // Molxona
     TURKEY,         // Kurkaxona
     SHEEPFOLD,      // Qo'yxona
-    WORKSHOP,       // Ishlab chiqarish sexi (kolbasa, pechenye)
-    AUX_LAND,       // Yordamchi xo‘jalik yerlari
-    BORDER_LAND,    // Chegara oldi yer maydonlari
-    FISHPOND,       // Baliqchilik ko‘llari
+    WORKSHOP,       // Ishlab chiqarish sexi
+    AUX_LAND,       // Yordamchi xo'jalik yerlari
+    BORDER_LAND,    // Chegara oldi yerlar
+    FISHPOND,       // Baliqchilik ko'llari
 
-    // (oldingi turlar qolaversin — ishlatilmasa ham zarar qilmaydi)
-    WAREHOUSE,
-    ORCHARD,
-    FIELD,
-    STABLE,
-    APIARY
+    // Legacy / mavjud ma'lumotlarni buzmaslik uchun qoldiramiz
+    FISHFARM, STABLE, WAREHOUSE, ORCHARD, FIELD, APIARY
 }
