@@ -1,50 +1,69 @@
 package com.agri.mapapp.common;
 
-import jakarta.persistence.EntityNotFoundException;
-import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.http.*;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.ControllerAdvice;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
-import java.time.Instant;
-import java.util.*;
+import jakarta.persistence.EntityNotFoundException;
+import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 
-@RestControllerAdvice
+@ControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException ex) {
+    // ✅ Umumiy xatolik javobi yaratish
+    private ResponseEntity<Object> buildErrorResponse(HttpStatus status, String message, Object details) {
         Map<String, Object> body = new HashMap<>();
-        body.put("error", "VALIDATION_FAILED");
-        Map<String, String> fields = new HashMap<>();
-        for (FieldError fe : ex.getBindingResult().getFieldErrors()) {
-            fields.put(fe.getField(), fe.getDefaultMessage());
+        body.put("timestamp", LocalDateTime.now());
+        body.put("status", status.value());
+        body.put("error", status.getReasonPhrase());
+        body.put("message", message);
+        if (details != null) {
+            body.put("details", details);
         }
-        body.put("fields", fields);
-        return ResponseEntity.badRequest().body(body);
+        return new ResponseEntity<>(body, new HttpHeaders(), status);
     }
 
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<Map<String, Object>> handleIllegalArg(IllegalArgumentException ex) {
-        return ResponseEntity.badRequest().body(Map.of("error", "BAD_REQUEST", "message", ex.getMessage()));
-    }
-
+    // ✅ Entity topilmasa
     @ExceptionHandler(EntityNotFoundException.class)
-    public ResponseEntity<Map<String, Object>> handleNotFound(EntityNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                .body(Map.of("error", "NOT_FOUND", "message", ex.getMessage()));
+    public ResponseEntity<Object> handleEntityNotFound(EntityNotFoundException ex) {
+        return buildErrorResponse(HttpStatus.NOT_FOUND, ex.getMessage(), null);
     }
 
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<Map<String, Object>> handleOther(HttpServletRequest request, Exception ex) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("timestamp", Instant.now().toString());
-        body.put("status", HttpStatus.INTERNAL_SERVER_ERROR.value());
-        body.put("error", ex.getClass().getSimpleName());
-        body.put("message", ex.getMessage() != null ? ex.getMessage() : "");
-        body.put("path", request != null ? request.getRequestURI() : "");
+    // ✅ Ruxsat yo‘q bo‘lsa
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<Object> handleAccessDenied(AccessDeniedException ex) {
+        return buildErrorResponse(HttpStatus.FORBIDDEN, "Access denied", null);
+    }
 
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
+    // ✅ Validatsiya xatolari
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<Object> handleValidationErrors(MethodArgumentNotValidException ex) {
+        Map<String, String> errors = new HashMap<>();
+        for (FieldError error : ex.getBindingResult().getFieldErrors()) {
+            errors.put(error.getField(), error.getDefaultMessage());
+        }
+        return buildErrorResponse(HttpStatus.BAD_REQUEST, "Validation error", errors);
+    }
+
+    // ✅ URL parametri noto‘g‘ri bo‘lsa
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Object> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        String msg = String.format("Invalid value '%s' for parameter '%s'. Expected type: %s",
+                ex.getValue(), ex.getName(), ex.getRequiredType().getSimpleName());
+        return buildErrorResponse(HttpStatus.BAD_REQUEST, msg, null);
+    }
+
+    // ✅ Boshqa barcha xatoliklar
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Object> handleAll(Exception ex) {
+        return buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR, ex.getMessage(), null);
     }
 }

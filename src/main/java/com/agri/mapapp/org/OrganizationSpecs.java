@@ -34,4 +34,12 @@ public final class OrganizationSpecs {
             return root.get("parent").get("id").in(parentIds);
         };
     }
+
+    public static Specification<OrganizationUnit> idIn(Collection<Long> ids) {
+        return (root, cq, cb) -> {
+            if (ids == null) return null;          // null => cheklanmagan (ADMIN)
+            if (ids.isEmpty()) return cb.disjunction(); // bo'sh set => natija yo'q
+            return root.get("id").in(ids);
+        };
+    }
 }

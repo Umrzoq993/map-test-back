@@ -1,5 +1,6 @@
 package com.agri.mapapp.facility;
 
+import com.agri.mapapp.common.PageResponse;
 import com.agri.mapapp.facility.dto.*;
 import com.agri.mapapp.facility.validation.FacilityAttributesValidator;
 import com.agri.mapapp.org.OrganizationUnit;
@@ -8,8 +9,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -18,6 +26,66 @@ public class FacilityService {
     private final FacilityRepository repo;
     private final OrganizationUnitRepository orgRepo;
     private final FacilityAttributesValidator validator;
+
+    public PageResponse<FacilityRes> getFacilitiesPage(
+            Long orgId,
+            FacilityType type,
+            FacilityStatus status,
+            String q,
+            Pageable pageable
+    ) {
+        Specification<Facility> spec = Specification
+                .where(FacilitySpecs.orgEq(orgId))
+                .and(FacilitySpecs.typeEq(type))
+                .and(FacilitySpecs.statusEq(status))
+                .and(FacilitySpecs.nameLike(q));
+
+        Page<Facility> page = repo.findAll(spec, pageable);
+
+        Page<FacilityRes> mapped = page.map(f -> FacilityRes.builder()
+                .id(f.getId())
+                .orgId(f.getOrg() != null ? f.getOrg().getId() : null)
+                .orgName(f.getOrg() != null ? f.getOrg().getName() : null)
+                .name(f.getName())
+                .type(f.getType())
+                .status(f.getStatus())
+                .lat(f.getLat())
+                .lng(f.getLng())
+                .zoom(f.getZoom())
+                .attributes(f.getAttributes())
+                .geometry(f.getGeometry())
+                .createdAt(f.getCreatedAt() != null ? f.getCreatedAt().toString() : null)
+                .updatedAt(f.getUpdatedAt() != null ? f.getUpdatedAt().toString() : null)
+                .build());
+
+        return PageResponse.of(mapped);
+    }
+
+    /** ✅ Pageable + filter bilan barcha obyektlarni olish */
+    public PageResponse<FacilityRes> getAllFacilities(Long orgId,
+                                                      Collection<FacilityType> types,
+                                                      FacilityStatus status,
+                                                      LocalDateTime from,
+                                                      LocalDateTime to,
+                                                      Pageable pageable) {
+
+        Specification<Facility> spec = Specification.where(
+                        FacilitySpecs.orgIn(orgId == null ? null : Set.of(orgId)))
+                .and(FacilitySpecs.typeIn(types))
+                .and(FacilitySpecs.statusEq(status))
+                .and(FacilitySpecs.createdBetween(from, to));
+
+        Page<Facility> page = repo.findAll(spec, pageable);
+
+        return new PageResponse<>(
+                page.map(FacilityRes::fromEntity).toList(),
+                page.getNumber(),
+                page.getSize(),
+                page.getTotalElements(),
+                page.getTotalPages(),
+                page.isLast()
+        );
+    }
 
     @Transactional(readOnly = true)
     public FacilityRes get(Long id) {
@@ -30,7 +98,6 @@ public class FacilityService {
         OrganizationUnit org = orgRepo.findById(req.getOrgId())
                 .orElseThrow(() -> new IllegalArgumentException("Org not found: " + req.getOrgId()));
 
-        // type ga mos attributes ni tekshiramiz
         validator.validate(req.getType(), req.getAttributes());
 
         Facility f = Facility.builder()
@@ -53,7 +120,6 @@ public class FacilityService {
         OrganizationUnit org = orgRepo.findById(req.getOrgId())
                 .orElseThrow(() -> new IllegalArgumentException("Org not found: " + req.getOrgId()));
 
-        // type ga mos attributes tekshiruvi
         validator.validate(req.getType(), req.getAttributes());
 
         f.setOrg(org);
@@ -90,7 +156,6 @@ public class FacilityService {
             f.setAttributes(merged);
         }
 
-        // PATCHdan keyin ham aktual holatni type bo‘yicha tekshirib qo‘yish foydali
         validator.validate(f.getType(), f.getAttributes());
 
         return toRes(f);
@@ -113,14 +178,13 @@ public class FacilityService {
                 .lat(f.getLat())
                 .lng(f.getLng())
                 .zoom(f.getZoom())
-                .attributes(f.getAttributes()) // Frontendga "details" nomida chiqadi
+                .attributes(f.getAttributes())
                 .geometry(f.getGeometry())
                 .createdAt(f.getCreatedAt() != null ? f.getCreatedAt().toString() : null)
                 .updatedAt(f.getUpdatedAt() != null ? f.getUpdatedAt().toString() : null)
                 .build();
     }
 
-    /** JsonNode deep merge: updates dagi obyekt maydonlari target ga qo‘shiladi/yangilanadi */
     private JsonNode deepMerge(JsonNode target, JsonNode updates) {
         if (target == null || target.isNull()) return updates;
         if (updates == null || updates.isNull()) return target;

@@ -2,6 +2,7 @@ package com.agri.mapapp.org;
 
 import com.agri.mapapp.auth.Role;
 import com.agri.mapapp.auth.UserPrincipal;
+import com.agri.mapapp.common.PageResponse;
 import lombok.*;
 import org.springframework.data.domain.*;
 import org.springframework.data.web.PageableDefault;
@@ -26,14 +27,13 @@ public class OrganizationController {
     }
 
     @GetMapping
-    public ResponseEntity<Page<OrgFlatRes>> page(
+    public ResponseEntity<PageResponse<OrgFlatRes>> page(
             Authentication auth,
             @RequestParam(required = false) String q,
             @RequestParam(required = false) Long parentId,
             @PageableDefault(size = 20, sort = {"sortOrder","name"}) Pageable pageable
     ) {
         Set<Long> allowed = access.allowedOrgIds(auth);
-        // Agar parentId berilgan bo‘lsa, uni ko‘rishga ruxsat borligini tekshiramiz
         if (parentId != null && allowed != null && !allowed.contains(parentId)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }

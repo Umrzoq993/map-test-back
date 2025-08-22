@@ -37,4 +37,21 @@ public final class FacilitySpecs {
             return cb.lessThanOrEqualTo(root.get("createdAt"), to);
         };
     }
+
+    // --- Qo‘shimcha qulay spec’lar ---
+    public static Specification<Facility> orgEq(Long orgId) {
+        return (root, cq, cb) -> orgId == null ? null : cb.equal(root.get("org").get("id"), orgId);
+    }
+
+    public static Specification<Facility> typeEq(FacilityType type) {
+        return (root, cq, cb) -> type == null ? null : cb.equal(root.get("type"), type);
+    }
+
+    public static Specification<Facility> nameLike(String q) {
+        return (root, cq, cb) -> {
+            if (q == null || q.trim().isEmpty()) return null;
+            return cb.like(cb.lower(root.get("name")), "%" + q.toLowerCase().trim() + "%");
+        };
+    }
+
 }

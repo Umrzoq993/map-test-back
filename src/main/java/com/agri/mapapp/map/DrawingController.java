@@ -1,8 +1,13 @@
 package com.agri.mapapp.map;
 
+import com.agri.mapapp.common.PageResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,6 +18,26 @@ public class DrawingController {
 
     private final DrawingRepository repo;
     private final ObjectMapper om;
+
+    @GetMapping
+    public PageResponse<DrawingRes> page(
+            @RequestParam(required = false) String q,
+            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
+    ) {
+        Page<Drawing> page = (q == null || q.isBlank())
+                ? repo.findAll(pageable)
+                : repo.findByNameContainingIgnoreCase(q.trim(), pageable);
+
+        Page<DrawingRes> mapped = page.map(d ->
+                DrawingRes.builder()
+                        .id(d.getId())
+                        .name(d.getName())
+                        .geojson(d.getGeojson())
+                        .createdAt(d.getCreatedAt() != null ? d.getCreatedAt().toString() : null)
+                        .build()
+        );
+        return PageResponse.of(mapped);
+    }
 
     @PostMapping
     public ResponseEntity<DrawingRes> save(@RequestBody SaveDrawingReq req) {

@@ -1,6 +1,7 @@
 // src/main/java/com/agri/mapapp/org/OrganizationService.java
 package com.agri.mapapp.org;
 
+import com.agri.mapapp.common.PageResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.*;
 import org.springframework.data.jpa.domain.Specification;
@@ -95,15 +96,11 @@ public class OrganizationService {
 
     // ---------- PAGINATION + SORT (Specification bilan) ----------
 
-    public Page<OrgFlatRes> findPageForUser(String q, Long parentId, Pageable pageable, Set<Long> allowed) {
+    public PageResponse<OrgFlatRes> findPageForUser(String q, Long parentId, Pageable pageable, Set<Long> allowed) {
         // bazaviy spec
         Specification<OrganizationUnit> spec = Specification.where(OrganizationSpecs.nameLike(q));
-        // agar parentId berilgan bo‘lsa, faqat shu parent ostidagilar
         if (parentId != null) spec = spec.and(OrganizationSpecs.parentEq(parentId));
-        // allowed != null bo‘lsa, ko‘rish faqat allowed subtree dagi idlar
-        if (allowed != null) {
-            spec = spec.and((root, cq, cb) -> root.get("id").in(allowed));
-        }
+        if (allowed != null) spec = spec.and(OrganizationSpecs.idIn(allowed));
 
         Sort sort = pageable.getSort();
         if (sort == null || sort.isUnsorted()) {
@@ -113,30 +110,33 @@ public class OrganizationService {
 
         Page<OrganizationUnit> page = repo.findAll(spec, pageReq);
 
-        // parent names & hasChildren/ depth — sizdagi ishlaydigan koddan foydalaning
-        List<OrgFlatRes> list = new java.util.ArrayList<>();
-        java.util.Set<Long> parentIds = new java.util.HashSet<>();
-        for (var u : page.getContent()) if (u.getParent()!=null) parentIds.add(u.getParent().getId());
-        var parentNames = new java.util.HashMap<Long,String>();
+        // parent names & hasChildren/ depth — SIZNING MANTIQ O‘ZGARMASIN
+        List<OrgFlatRes> list = new ArrayList<>();
+        Set<Long> parentIds = new HashSet<>();
+        for (var u : page.getContent()) if (u.getParent() != null) parentIds.add(u.getParent().getId());
+        Map<Long, String> parentNames = new HashMap<>();
         if (!parentIds.isEmpty()) {
             for (var p : repo.findAllById(parentIds)) parentNames.put(p.getId(), p.getName());
         }
-        // hasChildren (oddiy, tez): id ∈ any parent?
-        java.util.Set<Long> contentIds = new java.util.HashSet<>();
+        Set<Long> contentIds = new HashSet<>();
         for (var u : page.getContent()) contentIds.add(u.getId());
         var childSpec = OrganizationSpecs.parentIn(contentIds);
         var childs = repo.findAll(childSpec);
-        java.util.Set<Long> hasChildIds = new java.util.HashSet<>();
-        for (var c : childs) if (c.getParent()!=null) hasChildIds.add(c.getParent().getId());
+        Set<Long> hasChildIds = new HashSet<>();
+        for (var c : childs) if (c.getParent() != null) hasChildIds.add(c.getParent().getId());
 
         for (var u : page.getContent()) {
-            String pName = (u.getParent()!=null) ? parentNames.get(u.getParent().getId()) : null;
+            String pName = (u.getParent() != null) ? parentNames.get(u.getParent().getId()) : null;
             int depth = depthOf(u);
             boolean hc = hasChildIds.contains(u.getId());
             list.add(OrgFlatRes.of(u, pName, depth, hc));
         }
-        return new PageImpl<>(list, pageReq, page.getTotalElements());
+
+        // AVVAL: return new PageImpl<>(list, pageReq, page.getTotalElements());
+        // YANGI:
+        return PageResponse.of(new PageImpl<>(list, pageReq, page.getTotalElements()));
     }
+
 
     public java.util.List<OrgNodeDto> getOrgTreeForUser(Set<Long> allowed) {
         if (allowed == null) return getOrgTree(); // ADMIN
