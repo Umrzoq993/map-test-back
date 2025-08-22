@@ -1,16 +1,15 @@
+// src/main/java/com/agri/mapapp/facility/FacilityRepository.java
 package com.agri.mapapp.facility;
 
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 
-public interface FacilityRepository extends JpaRepository<Facility, Long> {
+public interface FacilityRepository extends JpaRepository<Facility, Long>, JpaSpecificationExecutor<Facility> {
 
     List<Facility> findByOrg_Id(Long orgId);
 
-    // A) typesiz (oldingi kabi) — parametrni oldindan lower qilib yuboramiz, shu bois lower(:q) yo'q
     @Query("""
 select f from Facility f
 where (:orgId is null or f.org.id = :orgId)
