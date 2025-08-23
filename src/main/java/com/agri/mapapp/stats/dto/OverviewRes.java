@@ -8,24 +8,45 @@ import java.util.List;
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor @Builder
 public class OverviewRes {
-    /** Umumiy inshootlar soni (filterlar qo‘llangandan keyin) */
     private Long total;
-
-    /** ACTIVE holatidagi inshootlar soni */
     private Long active;
 
-    /** Turlar kesimidagi agregatsiya */
-    private List<TypeAgg> types;
+    private List<TypeAgg> types;                // count per type (legacy)
 
-    /** Oylar bo‘yicha yaratilganlar soni */
-    private List<MonthlyCount> monthly;
+    private List<MonthlyCount> monthly;         // current period year months
+    private List<MonthlyCount> prevMonthly;     // previous year months
+    private Long yearNewCount;
+    private Long prevYearNewCount;
+    private Double yoyNewPct;
 
-    /** Bo‘limlar (org) bo‘yicha taqsimot */
-    private List<OrgAgg> orgs;
+    // Finance monthlies
+    private List<MonthlyAmount> revenueMonthly;
+    private List<MonthlyAmount> revenuePrevMonthly;
+    private Double revenueYtd;
+    private Double revenuePrevYtd;
+    private Double yoyRevenuePct;
 
-    /** Kontekst: ko‘rilayotgan yil (ixtiyoriy) */
-    private Integer year;
+    private List<MonthlyAmount> profitMonthly;
+    private List<MonthlyAmount> profitPrevMonthly;
+    private Double profitYtd;
+    private Double profitPrevYtd;
+    private Double yoyProfitPct;
 
-    /** Qo‘llangan type filtrlar (ixtiyoriy) */
+    // Capacity & Productivity
+    private Double capacityUtilPct;     // sum(current)/sum(capacity)*100
+    private Double productivityKgPerM2; // sum(product_kg)/sum(area_m2)
+
+    // Enriched breakdowns
+    private List<TypeKpiAgg> typeKpis;          // type-based KPIs (revenue/profit/capacity/current)
+    private List<OrgRevenueAgg> topOrgRevenue;  // TOP-10 org by revenue
+
+    // Filters context
     private List<FacilityType> typesFilter;
+    private Integer year;
+    private String range;       // year|quarter|custom
+    private Integer quarter;    // 1..4
+    private String from;        // ISO (if custom)
+    private String to;          // ISO (if custom)
+
+    private List<OrgAgg> orgs;  // legacy org count
 }
