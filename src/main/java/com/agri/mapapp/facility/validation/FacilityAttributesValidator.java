@@ -8,14 +8,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 
-/**
- * attributes/details JSON ichidagi maydonlarni type-ga qarab tekshiradi.
- * - CREATE/PUT da: mavjud bo'lsa tipini tekshiradi (majburiy emas).
- * - PATCH da: merge qilgandan so'ng xuddi shunday tekshiruvdan o'tadi.
- *
- * Eslatma: ma'lumotlar ixtiyoriy, shu sabab "required" qat'iy qo'yilmadi.
- * Agar majburiy qilishni istasangiz, pastdagi "req(...)" larni ishga solish mumkin.
- */
 @Component
 public class FacilityAttributesValidator {
 
@@ -24,10 +16,15 @@ public class FacilityAttributesValidator {
 
         List<String> errors = switch (type) {
             case GREENHOUSE -> validateGreenhouse(attrs);
-            case POULTRY, COWSHED, TURKEY, SHEEPFOLD -> validateLivestock(attrs);
-            case WORKSHOP -> validateWorkshop(attrs);
+
+            case POULTRY_MEAT, POULTRY_EGG, COWSHED, TURKEY, SHEEPFOLD -> validateLivestock(attrs);
+
+            case WORKSHOP_SAUSAGE, WORKSHOP_COOKIE -> validateWorkshop(attrs);
+
             case AUX_LAND, BORDER_LAND -> validateAgriLand(attrs);
+
             case FISHPOND -> validateFish(attrs);
+
             default -> new ArrayList<>();
         };
 
@@ -56,7 +53,7 @@ public class FacilityAttributesValidator {
         num(a, "productAmount", e);
         num(a, "expectedRevenue", e);
         num(a, "netProfit", e);
-        // (ixtiyoriy) birlik kiritish: "productUnit": "kg" | "pcs"
+        // ixtiyoriy birlik: "kg" | "pcs"
         strOpt(a, "productUnit", e);
         return e;
     }
@@ -92,14 +89,15 @@ public class FacilityAttributesValidator {
         return e;
     }
 
-    // ---------- Helpers (type checks) ----------
+    // ---------- Helpers ----------
 
     private void num(JsonNode a, String field, List<String> e) {
-        check(a, field, n -> n.isNumber(), "number", e);
+        check(a, field, JsonNode::isNumber, "number", e);
     }
 
     private void integer(JsonNode a, String field, List<String> e) {
-        check(a, field, n -> n.isInt() || n.isLong() || (n.isNumber() && n.asDouble() == Math.floor(n.asDouble())), "integer", e);
+        check(a, field, n -> n.isInt() || n.isLong()
+                || (n.isNumber() && n.asDouble() == Math.floor(n.asDouble())), "integer", e);
     }
 
     private void str(JsonNode a, String field, List<String> e) {

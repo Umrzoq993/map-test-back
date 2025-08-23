@@ -1,4 +1,3 @@
-// src/main/java/com/agri/mapapp/bootstrap/FacilityGeometrySeeder.java
 package com.agri.mapapp.bootstrap;
 
 import com.agri.mapapp.facility.Facility;
@@ -24,9 +23,11 @@ import java.util.Random;
 @RequiredArgsConstructor
 public class FacilityGeometrySeeder implements ApplicationRunner {
 
+    // ❗ Faqat mavjud enum qiymatlari: FIELD/ORCHARD/FISHFARM yo‘q
     private static final EnumSet<FacilityType> POLY_TYPES = EnumSet.of(
-            FacilityType.FIELD, FacilityType.AUX_LAND, FacilityType.BORDER_LAND,
-            FacilityType.ORCHARD, FacilityType.FISHPOND, FacilityType.FISHFARM,
+            FacilityType.AUX_LAND,
+            FacilityType.BORDER_LAND,
+            FacilityType.FISHPOND,
             FacilityType.GREENHOUSE
     );
 
@@ -44,14 +45,18 @@ public class FacilityGeometrySeeder implements ApplicationRunner {
 
         int updated = 0;
         for (Facility f : candidates) {
-            if (updated % 2 == 1) { // yarmi
+            // Taxminan yarmini to‘ldiramiz
+            if ((updated % 2) == 1) {
                 updated++;
                 continue;
             }
-            if (f.getLat() == null || f.getLng() == null) continue;
+            if (f.getLat() == null || f.getLng() == null) {
+                updated++;
+                continue;
+            }
 
-            double d = 0.003 + rnd.nextDouble() * 0.004; // 300–700m kvadrat taxminan
-            ObjectNode poly = squarePolygon(f.getLat(), f.getLng(), d);
+            double delta = 0.003 + rnd.nextDouble() * 0.004; // ~300–700m kvadrat
+            ObjectNode poly = squarePolygon(f.getLat(), f.getLng(), delta);
             f.setGeometry(poly);
             facilities.save(f);
             updated++;
