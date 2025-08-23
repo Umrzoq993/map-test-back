@@ -4,6 +4,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface OrganizationUnitRepository extends JpaRepository<OrganizationUnit, Long>, JpaSpecificationExecutor<OrganizationUnit> {
 
@@ -14,4 +15,6 @@ public interface OrganizationUnitRepository extends JpaRepository<OrganizationUn
 
     // YANGI: bolalari bor-yo‘qligini tekshirish
     boolean existsByParent(OrganizationUnit parent);
+
+    Optional<OrganizationUnit> findByCode(String code);
 }

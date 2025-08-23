@@ -19,6 +19,9 @@ public class OrganizationUnit {
     @Column(nullable = false, columnDefinition = "text")
     private String name;
 
+    @Column(name = "code", length = 32, unique = true, nullable = false)
+    private String code;
+
     private Double lat;   // null bo‘lishi mumkin
     private Double lng;
     private Integer zoom; // ixtiyoriy

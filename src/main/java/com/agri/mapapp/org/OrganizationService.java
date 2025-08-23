@@ -1,4 +1,3 @@
-// src/main/java/com/agri/mapapp/org/OrganizationService.java
 package com.agri.mapapp.org;
 
 import com.agri.mapapp.common.PageResponse;
@@ -20,6 +19,11 @@ import static com.agri.mapapp.org.OrganizationSpecs.*;
 public class OrganizationService {
 
     private final OrganizationUnitRepository repo;
+
+    public Optional<OrganizationUnit> findByCode(String code) {
+        if (code == null || code.isBlank()) return Optional.empty();
+        return repo.findByCode(code.trim());
+    }
 
     /** Tree (sizdagi mavjud implementatsiya) — query-methodsiz ham bo‘ladi */
     public List<OrgNodeDto> getOrgTree() {
@@ -132,8 +136,6 @@ public class OrganizationService {
             list.add(OrgFlatRes.of(u, pName, depth, hc));
         }
 
-        // AVVAL: return new PageImpl<>(list, pageReq, page.getTotalElements());
-        // YANGI:
         return PageResponse.of(new PageImpl<>(list, pageReq, page.getTotalElements()));
     }
 

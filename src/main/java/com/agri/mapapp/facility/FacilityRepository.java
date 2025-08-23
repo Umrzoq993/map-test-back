@@ -4,11 +4,13 @@ package com.agri.mapapp.facility;
 import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 
 public interface FacilityRepository extends JpaRepository<Facility, Long>, JpaSpecificationExecutor<Facility> {
 
     List<Facility> findByOrg_Id(Long orgId);
+    List<Facility> findByOrgIdIn(Collection<Long> orgIds);
 
     @Query("""
 select f from Facility f

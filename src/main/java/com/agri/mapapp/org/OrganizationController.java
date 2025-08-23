@@ -9,6 +9,7 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.http.*;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Set;
@@ -19,6 +20,8 @@ import java.util.Set;
 public class OrganizationController {
     private final OrganizationService service;
     private final AccessService access;
+    // Qo‘shimcha: map qidiruv uchun (kod -> org + facilities + viewport)
+    private final OrganizationLocateService locateService;
 
     @GetMapping("/tree")
     public ResponseEntity<List<OrgNodeDto>> tree(Authentication auth) {
@@ -38,6 +41,24 @@ public class OrganizationController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
         return ResponseEntity.ok(service.findPageForUser(q, parentId, pageable, allowed));
+    }
+
+    // --- YANGI: Org’ni code bo‘yicha topish (yengil DTO) ---
+    @GetMapping("/by-code/{code}")
+    public ResponseEntity<OrgDto> getByCode(@PathVariable String code) {
+        var org = service.findByCode(code)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+        return ResponseEntity.ok(OrgDto.from(org));
+    }
+
+    // --- YANGI: Map uchun locate (org + avlodlari resurslari + viewport) ---
+    @GetMapping("/locate")
+    public ResponseEntity<OrgLocateResponse> locate(Authentication auth, @RequestParam("code") String code) {
+        var up = (UserPrincipal) auth.getPrincipal();
+        Set<Long> allowed = access.allowedOrgIds(auth);
+        Set<Long> scope = (up.getRole()== Role.ADMIN) ? null : allowed;
+        var resp = locateService.locateByCode(code.trim(), scope);
+        return ResponseEntity.ok(resp);
     }
 
     // CREATE
@@ -92,7 +113,7 @@ public class OrganizationController {
         return ResponseEntity.noContent().build();
     }
 
-    // DTOs (oldingidek)
+    // --- DTOs ---
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor
     public static class CreateOrgReq {
         private String name; private Long parentId; private Double lat; private Double lng; private Integer zoom; private Integer sortOrder;
@@ -104,5 +125,29 @@ public class OrganizationController {
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor
     public static class MoveOrgReq {
         private Long newParentId; private Integer orderIndex;
+    }
+
+    // YENGIL javob (by-code uchun). Frontendga kerak bo‘lgan minimal maydonlar:
+    @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+    public static class OrgDto {
+        private Long id;
+        private String code;
+        private String name;
+        private Long parentId;
+        private Double lat;
+        private Double lng;
+        private Integer zoom;
+
+        public static OrgDto from(OrganizationUnit u) {
+            return OrgDto.builder()
+                    .id(u.getId())
+                    .code(u.getCode())
+                    .name(u.getName())
+                    .parentId(u.getParent()!=null? u.getParent().getId(): null)
+                    .lat(u.getLat())
+                    .lng(u.getLng())
+                    .zoom(u.getZoom())
+                    .build();
+        }
     }
 }
