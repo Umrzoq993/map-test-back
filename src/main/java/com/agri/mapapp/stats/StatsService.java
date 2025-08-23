@@ -5,6 +5,7 @@ import com.agri.mapapp.facility.FacilityRepository;
 import com.agri.mapapp.facility.FacilityStatus;
 import com.agri.mapapp.facility.FacilityType;
 import com.agri.mapapp.stats.dto.*;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
@@ -19,7 +20,7 @@ public class StatsService {
 
     private final FacilityRepository facilityRepo;
 
-    // ✅ Faqat ko‘rsatiladigan (biz belgilagan) turlar
+    // ✅ Ko‘rinishi kerak bo‘lgan turlar
     private static final EnumSet<FacilityType> ALLOWED = EnumSet.of(
             FacilityType.GREENHOUSE,
             FacilityType.POULTRY_MEAT,
@@ -33,6 +34,13 @@ public class StatsService {
             FacilityType.BORDER_LAND,
             FacilityType.FISHPOND
     );
+
+    // 🔑 Alias kalitlar (moslashuvchan o‘qish)
+    private static final List<String> REV_KEYS   = List.of("expectedRevenue", "revenue");
+    private static final List<String> PROF_KEYS  = List.of("netProfit", "profit");
+    private static final List<String> PROD_KEYS  = List.of("productAmount", "product_kg", "yieldAmount", "yield_amount", "eggs_per_day");
+    private static final List<String> AREA_KEYS  = List.of("areaM2", "area_m2"); // + totalAreaHa (maxsus)
+    private static final String TOTAL_AREA_HA = "totalAreaHa";
 
     public OverviewRes overviewAdvanced(Set<Long> allowedOrgIds, Integer year,
                                         List<FacilityType> types,
@@ -65,11 +73,12 @@ public class StatsService {
         Specification<Facility> spec = Specification.where(alwaysTrue())
                 .and(typeIn(new ArrayList<>(ALLOWED)));
         if (allowedOrgIds != null) {
-            if (allowedOrgIds.isEmpty()) return emptyOverviewForWindow(y, types, range, quarter, winStart, winEnd);
+            if (allowedOrgIds.isEmpty())
+                return emptyOverviewForWindow(y, types, range, quarter, winStart, winEnd);
             spec = spec.and(orgIn(allowedOrgIds));
         }
 
-        // Frontdan kelgan turlarni ALLOWED bilan kesishma qilamiz
+        // Frontdan kelgan turlarni ALLOWED bilan kesishma
         if (types != null && !types.isEmpty()) {
             List<FacilityType> onlyAllowed = types.stream().filter(ALLOWED::contains).toList();
             if (onlyAllowed.isEmpty())
@@ -77,10 +86,10 @@ public class StatsService {
             spec = spec.and(typeIn(onlyAllowed));
         }
 
-        long total = facilityRepo.count(spec);
+        long total  = facilityRepo.count(spec);
         long active = facilityRepo.count(spec.and(statusEq(FacilityStatus.ACTIVE)));
 
-        List<Facility> base = facilityRepo.findAll(spec);
+        List<Facility> base     = facilityRepo.findAll(spec);
         List<Facility> inWindow = facilityRepo.findAll(spec.and(createdBetween(winStart, winEnd)));
 
         // Type bo‘yicha soni
@@ -93,8 +102,9 @@ public class StatsService {
 
         // Joriy yil oylari
         LocalDateTime yyyyStart = LocalDate.of(y, 1, 1).atStartOfDay();
-        LocalDateTime yyyyEnd = LocalDate.of(y + 1, 1, 1).atStartOfDay();
+        LocalDateTime yyyyEnd   = LocalDate.of(y + 1, 1, 1).atStartOfDay();
         List<Facility> thisYear = facilityRepo.findAll(spec.and(createdBetween(yyyyStart, yyyyEnd)));
+
         long[] monthBuckets = new long[12];
         for (Facility f : thisYear) {
             LocalDateTime c = f.getCreatedAt();
@@ -107,8 +117,9 @@ public class StatsService {
         // O‘tgan yil
         int py = y - 1;
         LocalDateTime prevStart = LocalDate.of(py, 1, 1).atStartOfDay();
-        LocalDateTime prevEnd = LocalDate.of(y, 1, 1).atStartOfDay();
+        LocalDateTime prevEnd   = LocalDate.of(y, 1, 1).atStartOfDay();
         List<Facility> prevYear = facilityRepo.findAll(spec.and(createdBetween(prevStart, prevEnd)));
+
         long[] prevBuckets = new long[12];
         for (Facility f : prevYear) {
             LocalDateTime c = f.getCreatedAt();
@@ -117,54 +128,56 @@ public class StatsService {
         List<MonthlyCount> prevMonthly = new ArrayList<>(12);
         for (int i = 0; i < 12; i++) prevMonthly.add(new MonthlyCount(i + 1, prevBuckets[i]));
         long prevYearNewCount = Arrays.stream(prevBuckets).sum();
-        Double yoyNewPct = (prevYearNewCount > 0) ? ((yearNewCount - (double) prevYearNewCount) * 100.0 / prevYearNewCount) : null;
+        Double yoyNewPct = (prevYearNewCount > 0)
+                ? ((yearNewCount - (double) prevYearNewCount) * 100.0 / prevYearNewCount)
+                : null;
 
-        // Moliyaviy (joriy va o‘tgan yil)
-        double[] revYY = new double[12], profYY = new double[12];
+        // Moliyaviy (joriy / o‘tgan yil) — aliaslarni hisobga olamiz
+        double[] revYY  = new double[12], profYY = new double[12];
         for (Facility f : thisYear) {
             LocalDateTime c = f.getCreatedAt();
             if (c == null || c.getYear() != y) continue;
             int m = c.getMonthValue() - 1;
-            revYY[m] += attrD(f, "revenue");
-            profYY[m] += attrD(f, "profit");
+            revYY[m]  += readAliases(f, REV_KEYS);
+            profYY[m] += readAliases(f, PROF_KEYS);
         }
         List<MonthlyAmount> revenueMonthly = new ArrayList<>(12);
-        List<MonthlyAmount> profitMonthly = new ArrayList<>(12);
+        List<MonthlyAmount> profitMonthly  = new ArrayList<>(12);
         for (int i = 0; i < 12; i++) {
             revenueMonthly.add(new MonthlyAmount(i + 1, revYY[i]));
             profitMonthly.add(new MonthlyAmount(i + 1, profYY[i]));
         }
 
-        double[] revPY = new double[12], profPY = new double[12];
+        double[] revPY  = new double[12], profPY = new double[12];
         for (Facility f : prevYear) {
             LocalDateTime c = f.getCreatedAt();
             if (c == null || c.getYear() != py) continue;
             int m = c.getMonthValue() - 1;
-            revPY[m] += attrD(f, "revenue");
-            profPY[m] += attrD(f, "profit");
+            revPY[m]  += readAliases(f, REV_KEYS);
+            profPY[m] += readAliases(f, PROF_KEYS);
         }
         List<MonthlyAmount> revenuePrevMonthly = new ArrayList<>(12);
-        List<MonthlyAmount> profitPrevMonthly = new ArrayList<>(12);
+        List<MonthlyAmount> profitPrevMonthly  = new ArrayList<>(12);
         for (int i = 0; i < 12; i++) {
             revenuePrevMonthly.add(new MonthlyAmount(i + 1, revPY[i]));
             profitPrevMonthly.add(new MonthlyAmount(i + 1, profPY[i]));
         }
 
-        // YTD (tanlangan oynada)
-        double revenueYtd = inWindow.stream().mapToDouble(f -> attrD(f, "revenue")).sum();
-        double profitYtd = inWindow.stream().mapToDouble(f -> attrD(f, "profit")).sum();
+        // YTD (tanlangan oynada) — aliaslar
+        double revenueYtd = inWindow.stream().mapToDouble(f -> readAliases(f, REV_KEYS)).sum();
+        double profitYtd  = inWindow.stream().mapToDouble(f -> readAliases(f, PROF_KEYS)).sum();
 
-        // YTD o‘tgan yil xuddi shu oynada -> YoY
+        // YTD o‘tgan yil (YoY)
         LocalDateTime winStartPrev = winStart.minusYears(1);
-        LocalDateTime winEndPrev = winEnd.minusYears(1);
+        LocalDateTime winEndPrev   = winEnd.minusYears(1);
         List<Facility> inPrevWindow = facilityRepo.findAll(spec.and(createdBetween(winStartPrev, winEndPrev)));
-        double revenuePrevYtd = inPrevWindow.stream().mapToDouble(f -> attrD(f, "revenue")).sum();
-        double profitPrevYtd = inPrevWindow.stream().mapToDouble(f -> attrD(f, "profit")).sum();
+        double revenuePrevYtd = inPrevWindow.stream().mapToDouble(f -> readAliases(f, REV_KEYS)).sum();
+        double profitPrevYtd  = inPrevWindow.stream().mapToDouble(f -> readAliases(f, PROF_KEYS)).sum();
         Double yoyRevenuePct = (revenuePrevYtd > 0) ? ((revenueYtd - revenuePrevYtd) * 100.0 / revenuePrevYtd) : null;
-        Double yoyProfitPct = (profitPrevYtd > 0) ? ((profitYtd - profitPrevYtd) * 100.0 / profitPrevYtd) : null;
+        Double yoyProfitPct  = (profitPrevYtd  > 0) ? ((profitYtd  - profitPrevYtd ) * 100.0 / profitPrevYtd ) : null;
 
         // Org bo‘yicha soni
-        Map<Long, Long> cntPerOrg = new HashMap<>();
+        Map<Long, Long>   cntPerOrg  = new HashMap<>();
         Map<Long, String> namePerOrg = new HashMap<>();
         for (Facility f : base) {
             if (f.getOrg() == null) continue;
@@ -177,16 +190,16 @@ public class StatsService {
                 .sorted(Comparator.comparingLong(OrgAgg::getCount).reversed())
                 .toList();
 
-        // Sig'im / mahsuldorlik (bazada)
-        double sumCurrent = 0.0, sumCapacity = 0.0, sumProductKg = 0.0, sumAreaM2 = 0.0;
+        // Sig‘im / mahsuldorlik (bazadan)
+        double sumCurrent   = 0.0, sumCapacity = 0.0, sumProduct = 0.0, sumAreaM2 = 0.0;
         for (Facility f : base) {
-            sumCurrent += attrD(f, "current");
-            sumCapacity += attrD(f, "capacity");
-            sumProductKg += attrD(f, "product_kg");
-            sumAreaM2 += attrD(f, "area_m2");
+            sumCurrent   += readSingle(f, "current");
+            sumCapacity  += readSingle(f, "capacity");
+            sumProduct   += readAliases(f, PROD_KEYS);
+            sumAreaM2    += readAreaM2(f); // areaM2 yoki totalAreaHa*10000
         }
-        Double capacityUtilPct = (sumCapacity > 0) ? (sumCurrent * 100.0 / sumCapacity) : null;
-        Double productivityKgPerM2 = (sumAreaM2 > 0) ? (sumProductKg / sumAreaM2) : null;
+        Double capacityUtilPct      = (sumCapacity > 0) ? (sumCurrent * 100.0 / sumCapacity) : null;
+        Double productivityPerM2    = (sumAreaM2   > 0) ? (sumProduct / sumAreaM2) : null;
 
         // Type KPI (oyna ichida)
         Map<FacilityType, TypeKpiAgg> typeKpisMap = new EnumMap<>(FacilityType.class);
@@ -196,10 +209,10 @@ public class StatsService {
             TypeKpiAgg agg = typeKpisMap.computeIfAbsent(t,
                     k -> new TypeKpiAgg(k, 0L, 0.0, 0.0, 0.0, 0.0, null));
             agg.setCount(agg.getCount() + 1);
-            agg.setRevenue(agg.getRevenue() + attrD(f, "revenue"));
-            agg.setProfit(agg.getProfit() + attrD(f, "profit"));
-            agg.setCurrent(agg.getCurrent() + attrD(f, "current"));
-            agg.setCapacity(agg.getCapacity() + attrD(f, "capacity"));
+            agg.setRevenue(agg.getRevenue() + readAliases(f, REV_KEYS));
+            agg.setProfit(agg.getProfit()   + readAliases(f, PROF_KEYS));
+            agg.setCurrent(agg.getCurrent() + readSingle(f, "current"));
+            agg.setCapacity(agg.getCapacity() + readSingle(f, "capacity"));
         }
         List<TypeKpiAgg> typeKpis = typeKpisMap.values().stream()
                 .peek(a -> a.setUtilPct(a.getCapacity() > 0 ? (a.getCurrent() * 100.0 / a.getCapacity()) : null))
@@ -213,8 +226,8 @@ public class StatsService {
             Long id = f.getOrg().getId();
             OrgRevenueAgg agg = byOrgRev.computeIfAbsent(id, k -> new OrgRevenueAgg(id, safeOrgName(f), 0L, 0.0, 0.0));
             agg.setCount(agg.getCount() + 1);
-            agg.setRevenue(agg.getRevenue() + attrD(f, "revenue"));
-            agg.setProfit(agg.getProfit() + attrD(f, "profit"));
+            agg.setRevenue(agg.getRevenue() + readAliases(f, REV_KEYS));
+            agg.setProfit(agg.getProfit()   + readAliases(f, PROF_KEYS));
         }
         List<OrgRevenueAgg> topOrgRevenue = byOrgRev.values().stream()
                 .sorted(Comparator.comparingDouble(OrgRevenueAgg::getRevenue).reversed())
@@ -245,7 +258,7 @@ public class StatsService {
         res.setYoyProfitPct(yoyProfitPct);
 
         res.setCapacityUtilPct(capacityUtilPct);
-        res.setProductivityKgPerM2(productivityKgPerM2);
+        res.setProductivityKgPerM2(productivityPerM2); // nomi eski bo‘lsa ham formulasi umumiy
         res.setTypeKpis(typeKpis);
         res.setTopOrgRevenue(topOrgRevenue);
         res.setOrgs(orgs);
@@ -289,40 +302,43 @@ public class StatsService {
         Specification<Facility> spec = Specification.where(alwaysTrue())
                 .and(typeIn(new ArrayList<>(ALLOWED)));
         if (allowedOrgIds != null) {
-            if (allowedOrgIds.isEmpty()) return "orgId,orgName,type,createdAt,revenue,profit,current,capacity,product_kg,area_m2\n";
+            if (allowedOrgIds.isEmpty())
+                return "orgId,orgName,type,createdAt,expectedRevenue,netProfit,current,capacity,productAmount,areaM2\n";
             spec = spec.and(orgIn(allowedOrgIds));
         }
         if (types != null && !types.isEmpty()) {
             List<FacilityType> onlyAllowed = types.stream().filter(ALLOWED::contains).toList();
             if (onlyAllowed.isEmpty())
-                return "orgId,orgName,type,createdAt,revenue,profit,current,capacity,product_kg,area_m2\n";
+                return "orgId,orgName,type,createdAt,expectedRevenue,netProfit,current,capacity,productAmount,areaM2\n";
             spec = spec.and(typeIn(onlyAllowed));
         }
 
         List<Facility> inWindow = facilityRepo.findAll(spec.and(createdBetween(winStart, winEnd)));
 
         StringBuilder sb = new StringBuilder();
-        sb.append("orgId,orgName,type,createdAt,revenue,profit,current,capacity,product_kg,area_m2\n");
+        sb.append("orgId,orgName,type,createdAt,expectedRevenue,netProfit,current,capacity,productAmount,areaM2\n");
         for (Facility f : inWindow) {
             Long orgId = (f.getOrg() != null) ? f.getOrg().getId() : null;
             String orgName = (f.getOrg() != null) ? safeOrgName(f) : "";
             String type = (f.getType() != null) ? f.getType().name() : "";
             String created = (f.getCreatedAt() != null) ? f.getCreatedAt().toString() : "";
-            double revenue = attrD(f, "revenue");
-            double profit = attrD(f, "profit");
-            double current = attrD(f, "current");
-            double capacity = attrD(f, "capacity");
-            double productKg = attrD(f, "product_kg");
-            double areaM2 = attrD(f, "area_m2");
+
+            double expectedRevenue = readAliases(f, REV_KEYS);
+            double netProfit       = readAliases(f, PROF_KEYS);
+            double current         = readSingle(f, "current");
+            double capacity        = readSingle(f, "capacity");
+            double productAmount   = readAliases(f, PROD_KEYS);
+            double areaM2          = readAreaM2(f);
+
             sb.append(csv(orgId)).append(',')
                     .append(csv(orgName)).append(',')
                     .append(csv(type)).append(',')
                     .append(csv(created)).append(',')
-                    .append(revenue).append(',')
-                    .append(profit).append(',')
+                    .append(expectedRevenue).append(',')
+                    .append(netProfit).append(',')
                     .append(current).append(',')
                     .append(capacity).append(',')
-                    .append(productKg).append(',')
+                    .append(productAmount).append(',')
                     .append(areaM2).append('\n');
         }
         return sb.toString();
@@ -356,23 +372,83 @@ public class StatsService {
         return (root, cq, cb) -> cb.between(root.get("createdAt"), from, to);
     }
 
-    @SuppressWarnings("unchecked")
-    private double attrD(Facility f, String key) {
-        try {
-            Object attrs = f.getAttributes();
-            if (attrs instanceof Map<?, ?> map) {
-                Object v = map.get(key);
-                return num(v);
-            }
-        } catch (Exception ignored) {}
+    /* -------------------- Attribute readers (alias-aware) -------------------- */
+
+    private double readAliases(Facility f, List<String> keys) {
+        Object attrs = f.getAttributes();
+        for (String k : keys) {
+            double v = readFrom(attrs, k);
+            if (v != 0.0) return v;
+            // 0.0 bo‘lsa ham aniq mavjudligini tekshirish uchun:
+            if (existsAsZero(attrs, k)) return 0.0;
+        }
         return 0.0;
     }
+
+    private double readAreaM2(Facility f) {
+        Object attrs = f.getAttributes();
+        // areaM2 / area_m2
+        for (String k : AREA_KEYS) {
+            double v = readFrom(attrs, k);
+            if (v != 0.0) return v;
+            if (existsAsZero(attrs, k)) return 0.0;
+        }
+        // totalAreaHa → m²
+        double ha = readFrom(attrs, TOTAL_AREA_HA);
+        if (ha != 0.0 || existsAsZero(attrs, TOTAL_AREA_HA)) {
+            return ha * 10_000.0;
+        }
+        return 0.0;
+    }
+
+    private double readSingle(Facility f, String key) {
+        return readFrom(f.getAttributes(), key);
+    }
+
+    private boolean existsAsZero(Object attrs, String key) {
+        if (attrs instanceof Map<?,?> map) {
+            Object v = map.get(key);
+            return v != null;
+        } else if (attrs instanceof JsonNode node) {
+            JsonNode n = node.get(key);
+            return n != null && !n.isNull();
+        }
+        return false;
+    }
+
+    @SuppressWarnings("unchecked")
+    private double readFrom(Object attrs, String key) {
+        try {
+            Object v = null;
+            if (attrs instanceof Map<?, ?> map) {
+                v = map.get(key);
+            } else if (attrs instanceof JsonNode node) {
+                JsonNode n = node.get(key);
+                if (n != null && !n.isNull()) {
+                    if (n.isNumber()) return n.asDouble();
+                    if (n.isTextual()) return parseDouble(n.asText());
+                    // boshqa turlar uchun – e’tibor bermaymiz
+                    return 0.0;
+                }
+            }
+            return num(v);
+        } catch (Exception ignored) {
+            return 0.0;
+        }
+    }
+
     private double num(Object v) {
         if (v == null) return 0.0;
         if (v instanceof Number n) return n.doubleValue();
-        if (v instanceof String s) { try { return Double.parseDouble(s.trim()); } catch (Exception ignored) {} }
+        if (v instanceof String s) return parseDouble(s);
         return 0.0;
     }
+
+    private double parseDouble(String s) {
+        if (s == null) return 0.0;
+        try { return Double.parseDouble(s.trim()); } catch (Exception e) { return 0.0; }
+    }
+
     private String safeOrgName(Facility f) {
         try { return f.getOrg().getName(); } catch (Exception e) { return "—"; }
     }
