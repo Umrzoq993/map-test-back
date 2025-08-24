@@ -1,29 +1,55 @@
-// src/main/java/com/agri/mapapp/config/CorsConfig.java
 package com.agri.mapapp.config;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.cors.*;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import java.util.List;
+import java.util.Arrays;
 
 @Configuration
+@ConditionalOnProperty(name = "app.cors.enabled", havingValue = "true", matchIfMissing = true)
 public class CorsConfig {
+
+    @Value("${app.cors.allowed-origins:http://localhost:5173}")
+    private String allowedOriginsCsv;
+
+    @Value("${app.cors.allowed-methods:GET,POST,PATCH,DELETE,OPTIONS}")
+    private String allowedMethodsCsv;
+
+    @Value("${app.cors.allowed-headers:*}")
+    private String allowedHeadersCsv;
+
+    @Value("${app.cors.exposed-headers:Authorization}")
+    private String exposedHeadersCsv;
+
+    @Value("${app.cors.allow-credentials:false}")
+    private boolean allowCredentials;
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration conf = new CorsConfiguration();
-        // Dev originlar: Vite
-        conf.setAllowedOrigins(List.of("http://localhost:5173", "http://127.0.0.1:5173"));
-        conf.setAllowedMethods(List.of("GET","POST","PUT","PATCH","DELETE","OPTIONS"));
-        conf.setAllowedHeaders(List.of("Authorization","Content-Type","Accept","Origin","X-Requested-With"));
-        conf.setExposedHeaders(List.of("Location","Content-Disposition"));
-        conf.setAllowCredentials(true); // JWT header borligi uchun kerak
-        conf.setMaxAge(3600L);
+        CorsConfiguration config = new CorsConfiguration();
+
+        Arrays.stream(allowedOriginsCsv.split(","))
+                .map(String::trim).forEach(config::addAllowedOrigin);
+
+        Arrays.stream(allowedMethodsCsv.split(","))
+                .map(String::trim).forEach(config::addAllowedMethod);
+
+        Arrays.stream(allowedHeadersCsv.split(","))
+                .map(String::trim).forEach(config::addAllowedHeader);
+
+        Arrays.stream(exposedHeadersCsv.split(","))
+                .map(String::trim).forEach(config::addExposedHeader);
+
+        config.setAllowCredentials(allowCredentials);
+        config.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", conf);
+        source.registerCorsConfiguration("/**", config);
         return source;
     }
 }

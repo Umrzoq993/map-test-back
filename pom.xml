@@ -115,6 +115,27 @@
 			<version>2.8.10</version>
 		</dependency>
 
+		<!-- Bucket4j core -->
+		<dependency>
+			<groupId>com.bucket4j</groupId>
+			<artifactId>bucket4j-core</artifactId>
+			<version>8.9.0</version>
+		</dependency>
+
+		<!-- Bucket4j Redis integratsiyasi (Lettuce/Redisson/Jedis)
+     Biz Lettuce bilan ishlatamiz -->
+		<dependency>
+			<groupId>com.bucket4j</groupId>
+			<artifactId>bucket4j-redis</artifactId>
+			<version>8.9.0</version>
+		</dependency>
+
+		<!-- Redis (distributed rate limit) -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis</artifactId>
+		</dependency>
+
 	</dependencies>
 
 	<build>

@@ -1,4 +1,3 @@
-// src/main/java/com/agri/mapapp/config/SecurityConfig.java
 package com.agri.mapapp.config;
 
 import com.agri.mapapp.auth.JwtAuthFilter;
@@ -15,37 +14,36 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.web.cors.CorsConfigurationSource;
 
 @Configuration
 @EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-    private final JwtAuthFilter jwtFilter;
-    private final CorsConfigurationSource corsConfigurationSource;
+    private final JwtAuthFilter jwtAuthFilter;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(csrf -> csrf.disable())
+                .cors(cors -> {}) // CorsConfig dagi CorsConfigurationSource ishlaydi
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(reg -> reg
-                        // Swagger / OpenAPI
+                        // Faqat quyidagilar ochiq:
                         .requestMatchers(
-                                "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**", "/api-docs/**"
+                                "/api/auth/login",
+                                "/api/auth/refresh",
+                                "/api/auth/logout",
+                                "/swagger-ui/**",
+                                "/v3/api-docs/**",
+                                "/api-docs/**",
+                                "/swagger-ui.html"
                         ).permitAll()
-                        // CORS preflight
-                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        // Auth: faqat login va bootstrap public
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/bootstrap").permitAll()
-                        // Qolgan barcha /api/auth/** - autentifikatsiya talab qiladi
-                        .requestMatchers("/api/auth/**").authenticated()
-                        // Boshqa barcha API'lar ham token talab qiladi
+                        .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
+                        // Qolgan hammasi JWT talab qiladi
                         .anyRequest().authenticated()
                 )
-                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
