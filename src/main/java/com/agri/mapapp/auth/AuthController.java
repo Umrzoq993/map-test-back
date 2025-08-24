@@ -1,15 +1,17 @@
 package com.agri.mapapp.auth;
 
-import com.agri.mapapp.org.OrganizationUnit;
-import com.agri.mapapp.org.OrganizationUnitRepository;
-import lombok.*;
-import org.springframework.http.HttpStatus;
+import com.agri.mapapp.audit.AuditService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.constraints.NotBlank;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+import lombok.Setter;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
-import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -19,230 +21,155 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AuthController {
 
-    private final JwtService jwtService;
+    private final SessionService sessions;
+    private final AuditService audit;
+    private final OnlineUserTracker online;
     private final AppUserRepository userRepo;
-    private final OrganizationUnitRepository orgRepo;
-    private final PasswordEncoder passwordEncoder;
-
-    private final SessionService sessionService;
-    private final RateLimiter rateLimitService; // <-- interfeys (Redis yoki InMemory)
-
-    // -------- Helpers --------
-    private String resolveDeviceId(String bodyDeviceId, HttpServletRequest http) {
-        if (bodyDeviceId != null && !bodyDeviceId.isBlank()) return bodyDeviceId;
-        String h1 = http.getHeader("X-Device-Id");
-        if (h1 != null && !h1.isBlank()) return h1;
-        String h2 = http.getHeader("X-Device-ID");
-        if (h2 != null && !h2.isBlank()) return h2;
-        return null;
-    }
-
-    private String clientIp(HttpServletRequest http) {
-        String xf = http.getHeader("X-Forwarded-For");
-        if (xf != null && !xf.isBlank()) {
-            int comma = xf.indexOf(',');
-            return comma > 0 ? xf.substring(0, comma).trim() : xf.trim();
-        }
-        String rip = http.getHeader("X-Real-IP");
-        if (rip != null && !rip.isBlank()) return rip.trim();
-        return http.getRemoteAddr();
-    }
-
-    // -------- AUTH --------
-
-    @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody LoginReq req, HttpServletRequest http) {
-        String ip = clientIp(http);
-        if (!rateLimitService.tryConsumeLogin(ip)) {
-            return ResponseEntity.status(429).body(Map.of("message", "Too Many Requests"));
-        }
-        String ua = http.getHeader("User-Agent");
-        String deviceId = resolveDeviceId(req.getDeviceId(), http);
-        if (deviceId == null || deviceId.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("message", "deviceId is required"));
-        }
-        var pair = sessionService.loginIssueTokens(req.getUsername(), req.getPassword(), deviceId, ua, ip);
-        return ResponseEntity.ok(pair);
-    }
-
-    @PostMapping("/refresh")
-    public ResponseEntity<?> refresh(@RequestBody RefreshReq req, HttpServletRequest http) {
-        String ip = clientIp(http);
-        if (!rateLimitService.tryConsumeRefresh(ip)) {
-            return ResponseEntity.status(429).body(Map.of("message", "Too Many Requests"));
-        }
-        String ua = http.getHeader("User-Agent");
-        String deviceId = resolveDeviceId(req.getDeviceId(), http);
-        if (deviceId == null || deviceId.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("message", "deviceId is required"));
-        }
-        var pair = sessionService.rotate(req.getRefreshToken(), deviceId, ua, ip);
-        return ResponseEntity.ok(pair);
-    }
-
-    @PostMapping("/logout")
-    public ResponseEntity<?> logout(@RequestBody RefreshReq req) {
-        sessionService.logout(req.getRefreshToken());
-        return ResponseEntity.ok(Map.of("message", "Logged out"));
-    }
-
-    @GetMapping("/me")
-    public ResponseEntity<?> me(@RequestHeader(name = "Authorization", required = false) String auth) {
-        if (auth == null || !auth.startsWith("Bearer ")) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Unauthorized"));
-        }
-        String token = auth.substring(7);
-        if (!jwtService.isValid(token)) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Unauthorized"));
-        }
-        String username = jwtService.getUsername(token);
-        var user = userRepo.findByUsername(username).orElse(null);
-        if (user == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Unauthorized"));
-        }
-        Long orgId = user.getOrg() != null ? user.getOrg().getId() : null;
-        return ResponseEntity.ok(Map.of(
-                "id", user.getId(),
-                "username", user.getUsername(),
-                "role", user.getRole(),
-                "orgId", orgId
-        ));
-    }
-
-    // -------- HEARTBEAT --------
-
-    @PostMapping("/heartbeat")
-    public ResponseEntity<?> heartbeat(@RequestBody HeartbeatReq req, @RequestHeader("Authorization") String auth,
-                                       HttpServletRequest http) {
-        if (auth == null || !auth.startsWith("Bearer ")) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Unauthorized"));
-        }
-        String token = auth.substring(7);
-        if (!jwtService.isValid(token)) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Unauthorized"));
-        }
-        String username = jwtService.getUsername(token);
-        var user = userRepo.findByUsername(username).orElse(null);
-        if (user == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Unauthorized"));
-        }
-        String deviceId = resolveDeviceId(req.getDeviceId(), http);
-        if (deviceId == null || deviceId.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("message", "deviceId is required"));
-        }
-
-        sessionService.heartbeat(user.getId(), deviceId);
-        return ResponseEntity.ok(Map.of("ok", true, "ts", Instant.now().toString()));
-    }
-
-    @GetMapping("/online-count")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<?> onlineCount() {
-        int n = sessionService.onlineCount();
-        return ResponseEntity.ok(Map.of("online", n));
-    }
-
-    // -------- ADMIN --------
-
-    @PreAuthorize("hasRole('ADMIN')")
-    @PostMapping("/users")
-    public ResponseEntity<?> createUser(@RequestBody CreateUserReq req) {
-        if (userRepo.findByUsername(req.getUsername()).isPresent()) {
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body(Map.of("message", "Username already exists"));
-        }
-        OrganizationUnit org = null;
-        if (req.getOrgId() != null) {
-            org = orgRepo.findById(req.getOrgId())
-                    .orElseThrow(() -> new IllegalArgumentException("Org not found: " + req.getOrgId()));
-        }
-        AppUser user = AppUser.builder()
-                .username(req.getUsername())
-                .password(passwordEncoder.encode(req.getPassword()))
-                .role(req.getRole())
-                .org(org)
-                .build();
-        userRepo.save(user);
-        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
-                "id", user.getId(),
-                "username", user.getUsername(),
-                "role", user.getRole(),
-                "orgId", org != null ? org.getId() : null
-        ));
-    }
-
-    @GetMapping("/sessions")
-    @PreAuthorize("hasRole('ADMIN')")
-    public List<SessionRes> listSessions() {
-        return sessionService.listActiveSessions().stream()
-                .map(rt -> new SessionRes(
-                        rt.getId(),
-                        rt.getUser().getId(),
-                        rt.getUser().getUsername(),
-                        rt.getDeviceId(),
-                        rt.getUserAgent(),
-                        rt.getIp(),
-                        rt.getCreatedAt(),
-                        rt.getLastSeenAt(),
-                        rt.getExpiresAt()
-                ))
-                .toList();
-    }
-
-    @PostMapping("/sessions/revoke/{userId}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<?> revokeAllForUser(@PathVariable Long userId) {
-        sessionService.revokeAllForUser(userId);
-        return ResponseEntity.ok(Map.of("message", "All sessions revoked for user " + userId));
-    }
-
-    // -------- DTOs --------
 
     @Getter @Setter
     public static class LoginReq {
-        private String username;
-        private String password;
-        private String deviceId; // Body bo'sh bo'lsa headerdan olinadi
-    }
-
-    @Getter @AllArgsConstructor
-    public static class TokenPair {
-        private String tokenType;     // Bearer
-        private String accessToken;
-        private String refreshToken;
-        private Instant accessTokenExpiresAt; // info uchun
+        @NotBlank private String username;
+        @NotBlank private String password;
+        private String deviceId;
     }
 
     @Getter @Setter
     public static class RefreshReq {
-        private String refreshToken;
-        private String deviceId; // Body bo'sh bo'lsa headerdan olinadi
+        @NotBlank private String refreshToken;
+        private String deviceId;
     }
 
     @Getter @Setter
     public static class HeartbeatReq {
-        private String deviceId; // Body bo'sh bo'lsa headerdan olinadi
+        @NotBlank private String deviceId;
     }
 
-    @Getter
-    @AllArgsConstructor
-    public static class SessionRes {
-        private Long id;
-        private Long userId;
-        private String username;
+    @Getter @Setter @AllArgsConstructor
+    public static class SessionView {
         private String deviceId;
-        private String userAgent;
         private String ip;
+        private String userAgent;
         private Instant createdAt;
         private Instant lastSeenAt;
         private Instant expiresAt;
+        private boolean revoked;
+        private String tokenSuffix;
     }
 
-    @Getter @Setter
-    public static class CreateUserReq {
+    @Getter @Setter @AllArgsConstructor
+    public static class MeRes {
+        private Long id;
         private String username;
-        private String password;
-        private Role role;      // ADMIN yoki ORG_USER
-        private Long orgId;     // ixtiyoriy (ORG_USER uchun)
+        private Role role;
+        private Long orgId;     // OrganizationUnit.id
+        private String orgName; // OrganizationUnit.name
+    }
+
+    private String headerDeviceId(HttpServletRequest req, String fallback) {
+        String v = req.getHeader("X-Device-Id");
+        return (v != null && !v.isBlank()) ? v : fallback;
+    }
+    private String ipOf(HttpServletRequest req) {
+        String h = req.getHeader("X-Forwarded-For");
+        return (h != null && !h.isBlank()) ? h.split(",")[0].trim() : req.getRemoteAddr();
+    }
+    private String uaOf(HttpServletRequest req) {
+        String ua = req.getHeader("User-Agent");
+        return ua == null ? "" : ua;
+    }
+    private String tokenSuffix(String token) {
+        if (token == null) return "";
+        int n = token.length();
+        return n <= 8 ? token : token.substring(n - 8);
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<TokenPair> login(@RequestBody LoginReq body, HttpServletRequest req) {
+        String deviceId = headerDeviceId(req, body.getDeviceId());
+        String ip = ipOf(req);
+        String ua = uaOf(req);
+        TokenPair pair = sessions.loginIssueTokens(body.getUsername(), body.getPassword(), deviceId, ua, ip);
+        return ResponseEntity.ok(pair);
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<TokenPair> refresh(@RequestBody RefreshReq body, HttpServletRequest req) {
+        String deviceId = headerDeviceId(req, body.getDeviceId());
+        String ip = ipOf(req);
+        String ua = uaOf(req);
+        TokenPair pair = sessions.rotate(body.getRefreshToken(), deviceId, ua, ip);
+        return ResponseEntity.ok(pair);
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Map<String, Object>> logout(@RequestBody RefreshReq body) {
+        sessions.logout(body.getRefreshToken());
+        return ResponseEntity.ok(Map.of("ok", true));
+    }
+
+    @GetMapping("/me")
+    public ResponseEntity<MeRes> me(@AuthenticationPrincipal UserPrincipal principal) {
+        if (principal == null) return ResponseEntity.status(401).build();
+        AppUser u = userRepo.findByUsername(principal.getUsername()).orElseThrow();
+        Long orgId = (u.getOrgUnit() != null ? u.getOrgUnit().getId() : null);
+        String orgName = (u.getOrgUnit() != null ? u.getOrgUnit().getName() : null);
+        return ResponseEntity.ok(new MeRes(u.getId(), u.getUsername(), u.getRole(), orgId, orgName));
+    }
+
+    @PostMapping("/heartbeat")
+    public ResponseEntity<Map<String, Object>> heartbeat(@AuthenticationPrincipal UserPrincipal principal,
+                                                         @RequestBody HeartbeatReq body) {
+        if (principal == null) return ResponseEntity.status(401).build();
+        AppUser u = userRepo.findByUsername(principal.getUsername()).orElseThrow();
+        sessions.heartbeat(u.getId(), body.getDeviceId());
+        return ResponseEntity.ok(Map.of("ok", true));
+    }
+
+    @GetMapping("/sessions")
+    public ResponseEntity<List<SessionView>> mySessions(@AuthenticationPrincipal UserPrincipal principal,
+                                                        @RequestParam(name = "userId", required = false) Long userId,
+                                                        @RequestParam(name = "includeRevoked", defaultValue = "false") boolean includeRevoked,
+                                                        @RequestParam(name = "includeExpired", defaultValue = "false") boolean includeExpired) {
+        Long uid = userId;
+        if (uid == null) {
+            if (principal == null) return ResponseEntity.status(401).build();
+            AppUser u = userRepo.findByUsername(principal.getUsername()).orElseThrow();
+            uid = u.getId();
+        }
+
+        List<RefreshToken> list = sessions.listSessions(uid, includeRevoked, includeExpired);
+        List<SessionView> out = list.stream().map(rt -> new SessionView(
+                rt.getDeviceId(),
+                rt.getIp(),
+                rt.getUserAgent(),
+                rt.getCreatedAt(),
+                rt.getLastSeenAt(),
+                rt.getExpiresAt(),
+                rt.isRevoked(),
+                tokenSuffix(rt.getToken())
+        )).toList();
+
+        return ResponseEntity.ok(out);
+    }
+
+    @PostMapping("/sessions/revoke-others")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, Object>> revokeOthers(@RequestParam("userId") Long userId,
+                                                            @RequestParam("keepDeviceId") String keepDeviceId) {
+        sessions.revokeAllOtherDevices(userId, keepDeviceId);
+        return ResponseEntity.ok(Map.of("ok", true));
+    }
+
+    @PostMapping("/sessions/revoke")
+    public ResponseEntity<Map<String, Object>> revokeDevice(@RequestParam("userId") Long userId,
+                                                            @RequestParam("deviceId") String deviceId) {
+        sessions.revokeDevice(userId, deviceId);
+        return ResponseEntity.ok(Map.of("ok", true));
+    }
+
+    @GetMapping("/online-count")
+    public ResponseEntity<Map<String, Object>> onlineCount() {
+        int n = online.getOnlineCount();
+        return ResponseEntity.ok(Map.of("online", n));
     }
 }

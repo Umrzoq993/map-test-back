@@ -64,7 +64,7 @@ public class StatsController {
 
     // ================= Helpers =================
 
-    /** ADMIN => null (hammasi), ORG_USER => o‘zi + barcha avlodlari id’lari to‘plami */
+    /** ADMIN => null (hammasi), USER => o‘zi + barcha avlodlari id’lari to‘plami */
     private Set<Long> resolveAllowedScope(Authentication auth) {
         if (auth == null || !(auth.getPrincipal() instanceof UserPrincipal up)) {
             return Collections.emptySet(); // no auth => hech narsa
@@ -72,7 +72,7 @@ public class StatsController {
         if (up.getRole() == Role.ADMIN) {
             return null; // ADMIN => to‘liq ko‘rish
         }
-        return accessService.allowedOrgIds(auth); // ORG_USER => subtree
+        return accessService.allowedOrgIds(auth); // USER => subtree
     }
 
     private List<FacilityType> parseTypes(String types) {

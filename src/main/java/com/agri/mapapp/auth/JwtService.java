@@ -22,22 +22,26 @@ public class JwtService {
             @Value("${app.jwt.issuer:mapapp}") String issuer
     ) {
         byte[] raw = secret.getBytes(StandardCharsets.UTF_8);
-        // HS256 uchun kamida 32 bayt kalit
         if (raw.length < 32) {
-            raw = Arrays.copyOf(raw, 32);
+            raw = Arrays.copyOf(raw, 32); // HS256 uchun minimal uzunlik
         }
         this.key = Keys.hmacShaKeyFor(raw);
         this.accessExpMs = accessExpMinutes * 60_000L;
         this.issuer = issuer;
     }
 
+    /** Access tokenning TTL’i (millisekund) — frontga expire hisoblash uchun kerak bo‘ladi */
+    public long getAccessExpMs() {
+        return accessExpMs;
+    }
+
     public String generateAccessToken(String username, Role role, Long orgId) {
         long now = System.currentTimeMillis();
 
         Map<String, Object> claims = new HashMap<>();
-        // App-ichki claimlar
         claims.put("role", role != null ? role.name() : "USER");
         if (orgId != null) claims.put("orgId", orgId);
+
         // Spring Security uchun authorities (ROLE_ prefiks bilan)
         String r = role != null ? role.name() : "USER";
         claims.put("authorities", List.of("ROLE_" + r));
@@ -50,10 +54,6 @@ public class JwtService {
                 .setExpiration(new Date(now + accessExpMs))
                 .signWith(key, SignatureAlgorithm.HS256)
                 .compact();
-    }
-
-    public String generateAccessToken(UserPrincipal up) {
-        return generateAccessToken(up.getUsername(), up.getRole(), up.getOrgId());
     }
 
     public boolean isValid(String token) {
@@ -71,7 +71,7 @@ public class JwtService {
 
     public Role getRole(String token) {
         String r = Objects.toString(parse(token).getBody().get("role"), "USER");
-        try { return Role.valueOf(r); } catch (Exception e) { return Role.ORG_USER; }
+        try { return Role.valueOf(r); } catch (Exception e) { return Role.USER; }
     }
 
     public Long getOrgId(String token) {
@@ -91,7 +91,6 @@ public class JwtService {
             for (Object o : list) out.add(Objects.toString(o, ""));
             return out;
         }
-        // fallback agar yo'q bo'lsa
         String r = Objects.toString(parse(token).getBody().get("role"), "USER");
         return List.of("ROLE_" + r);
     }

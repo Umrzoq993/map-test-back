@@ -13,17 +13,20 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
 
     Optional<RefreshToken> findByUser_IdAndDeviceIdAndRevokedFalse(Long userId, String deviceId);
 
-    List<RefreshToken> findAllByRevokedFalse();
+    List<RefreshToken> findAllByUser_IdAndRevokedFalse(Long userId);
 
-    @Modifying
+    // Barcha sessiyalar (revoked bo‘lsa ham)
+    List<RefreshToken> findAllByUser_Id(Long userId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update RefreshToken rt set rt.revoked = true where rt.user.id = :userId and rt.revoked = false")
     int revokeAllByUserId(@Param("userId") Long userId);
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update RefreshToken rt set rt.revoked = true where rt.user.id = :userId and rt.deviceId <> :deviceId and rt.revoked = false")
     int revokeAllOtherDevices(@Param("userId") Long userId, @Param("deviceId") String deviceId);
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update RefreshToken rt set rt.lastSeenAt = :ts where rt.user.id = :userId and rt.deviceId = :deviceId and rt.revoked = false")
     int touchLastSeen(@Param("userId") Long userId, @Param("deviceId") String deviceId, @Param("ts") Instant ts);
 }

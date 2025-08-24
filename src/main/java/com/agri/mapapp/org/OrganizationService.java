@@ -114,7 +114,7 @@ public class OrganizationService {
 
         Page<OrganizationUnit> page = repo.findAll(spec, pageReq);
 
-        // parent names & hasChildren/ depth — SIZNING MANTIQ O‘ZGARMASIN
+        // parent names & hasChildren/ depth
         List<OrgFlatRes> list = new ArrayList<>();
         Set<Long> parentIds = new HashSet<>();
         for (var u : page.getContent()) if (u.getParent() != null) parentIds.add(u.getParent().getId());
@@ -133,7 +133,7 @@ public class OrganizationService {
             String pName = (u.getParent() != null) ? parentNames.get(u.getParent().getId()) : null;
             int depth = depthOf(u);
             boolean hc = hasChildIds.contains(u.getId());
-            list.add(OrgFlatRes.of(u, pName, depth, hc));
+            list.add(OrgFlatRes.of(u, pName, depth, hc)); // ✅ code ni of() ichida qo‘shdik
         }
 
         return PageResponse.of(new PageImpl<>(list, pageReq, page.getTotalElements()));
@@ -142,7 +142,6 @@ public class OrganizationService {
 
     public java.util.List<OrgNodeDto> getOrgTreeForUser(Set<Long> allowed) {
         if (allowed == null) return getOrgTree(); // ADMIN
-        // faqat allowed idlarni daraxtga solamiz
         var all = repo.findAll(Sort.by(Sort.Order.asc("sortOrder"), Sort.Order.asc("name")));
         var map = new java.util.HashMap<Long, OrgNodeDto>();
         var roots = new java.util.ArrayList<OrgNodeDto>();
@@ -171,13 +170,11 @@ public class OrganizationService {
 
     @Transactional(readOnly = true)
     public Page<OrgFlatRes> findPage(String q, Long parentId, Pageable pageable) {
-        // Spec: name LIKE + (parent == parentId) ixtiyoriy
         Specification<OrganizationUnit> spec = Specification.where(OrganizationSpecs.nameLike(q));
         if (parentId != null) {
             spec = spec.and(OrganizationSpecs.parentEq(parentId));
         }
 
-        // Default sort agar berilmagan bo‘lsa
         Sort sort = pageable.getSort();
         if (sort == null || sort.isUnsorted()) {
             sort = Sort.by(Sort.Order.asc("sortOrder"), Sort.Order.asc("name"));
@@ -187,13 +184,11 @@ public class OrganizationService {
         Page<OrganizationUnit> page = repo.findAll(spec, pageReq);
         List<OrganizationUnit> content = page.getContent();
 
-        // id’lar to‘plami
         Set<Long> ids = new HashSet<>();
         for (OrganizationUnit u : content) {
             ids.add(u.getId());
         }
 
-        // hasChildren: parent IN (ids) bo‘lgan bolalarni topib, parentId setini tuzamiz
         Set<Long> hasChildIds = new HashSet<>();
         if (!ids.isEmpty()) {
             Specification<OrganizationUnit> childrenSpec = OrganizationSpecs.parentIn(ids);
@@ -206,7 +201,6 @@ public class OrganizationService {
             }
         }
 
-        // parent nomlarini xaritalash
         Set<Long> parentIdSet = new HashSet<>();
         for (OrganizationUnit u : content) {
             if (u.getParent() != null) {
@@ -221,19 +215,18 @@ public class OrganizationService {
             }
         }
 
-        // Map -> DTO
         List<OrgFlatRes> list = new ArrayList<>(content.size());
         for (OrganizationUnit u : content) {
             String pName = (u.getParent() != null) ? parentNames.get(u.getParent().getId()) : null;
             int depth = depthOf(u);
             boolean hc = hasChildIds.contains(u.getId());
-            list.add(OrgFlatRes.of(u, pName, depth, hc));
+            list.add(OrgFlatRes.of(u, pName, depth, hc)); // ✅ code of() ichida
         }
 
         return new PageImpl<>(list, pageReq, page.getTotalElements());
     }
 
-    // ---------- CREATE / UPDATE / MOVE / DELETE (oldingi mantiq, lekin specs bilan siblings) ----------
+    // ---------- CREATE / UPDATE / MOVE / DELETE ----------
 
     @Transactional
     public OrganizationUnit createOrg(String name, Long parentId, Double lat, Double lng, Integer zoom, Integer sortOrder) {

@@ -1,5 +1,6 @@
 package com.agri.mapapp.auth;
 
+import com.agri.mapapp.audit.AuditService;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,9 +25,13 @@ public class SessionService {
     private final RefreshTokenRepository rtRepo;
     private final JwtService jwtService;
     private final OnlineUserTracker online;
+    private final AuditService audit;
 
-    @Value("${app.jwt.refresh-exp-seconds:86400}") // 1 kun default
+    @Value("${app.jwt.refresh-exp-seconds:86400}")
     private long refreshExpSeconds;
+
+    @Value("${app.security.refresh.rotate:true}")
+    private boolean rotateOnRefresh;
 
     @Value("${app.security.refresh.ip-binding.enabled:true}")
     private boolean ipBindingEnabled;
@@ -34,12 +39,18 @@ public class SessionService {
     @Value("${app.security.refresh.ua-binding.enabled:false}")
     private boolean uaBindingEnabled;
 
-    @Value("${app.security.refresh.ua-binding.mode:lenient}") // strict | lenient
+    @Value("${app.security.refresh.ua-binding.mode:lenient}")
     private String uaBindingMode;
 
+    @Value("${app.security.sessions.single-device.enabled:false}")
+    private boolean singleDeviceEnabled;
+
+    @Value("${app.security.sessions.single-device.policy:REVOKE_OLD}")
+    private String singleDevicePolicy;
+
     @Transactional
-    public AuthController.TokenPair loginIssueTokens(String username, String password,
-                                                     String deviceId, String userAgent, String ip) {
+    public TokenPair loginIssueTokens(String username, String password,
+                                      String deviceId, String userAgent, String ip) {
         Authentication auth = authManager.authenticate(
                 new UsernamePasswordAuthenticationToken(username, password));
         SecurityContextHolder.getContext().setAuthentication(auth);
@@ -47,10 +58,27 @@ public class SessionService {
         UserPrincipal up = (UserPrincipal) auth.getPrincipal();
         AppUser user = userRepo.findByUsername(up.getUsername()).orElseThrow();
 
-        // 1-device policy: barcha eski sessiyalarni o'chiramiz
-        rtRepo.revokeAllByUserId(user.getId());
+        // Status tekshiruvi
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            audit.log("SESSION_REJECTED", user, deviceId, ip, userAgent);
+            throw new BadCredentialsException("User is not active");
+        }
 
-        // yangi refresh token
+        // Single-device siyosati
+        if (singleDeviceEnabled) {
+            List<RefreshToken> actives = rtRepo.findAllByUser_IdAndRevokedFalse(user.getId()).stream()
+                    .filter(rt -> rt.getExpiresAt().isAfter(Instant.now()))
+                    .toList();
+            if (!actives.isEmpty()) {
+                if ("REJECT_NEW".equalsIgnoreCase(singleDevicePolicy)) {
+                    audit.log("SESSION_REJECTED", user, deviceId, ip, userAgent);
+                    throw new BadCredentialsException("Active session exists (single-device policy)");
+                } else {
+                    rtRepo.revokeAllByUserId(user.getId());
+                }
+            }
+        }
+
         RefreshToken rt = RefreshToken.builder()
                 .token(UUID.randomUUID().toString())
                 .user(user)
@@ -62,35 +90,43 @@ public class SessionService {
                 .build();
         rtRepo.save(rt);
 
-        Long orgId = user.getOrg() != null ? user.getOrg().getId() : null;
+        Long orgId = user.getOrgUnit() != null ? user.getOrgUnit().getId() : null;
         String access = jwtService.generateAccessToken(user.getUsername(), user.getRole(), orgId);
 
         online.ping(user.getId(), deviceId);
         rtRepo.touchLastSeen(user.getId(), deviceId, Instant.now());
 
-        return new AuthController.TokenPair("Bearer", access, rt.getToken(),
-                Instant.now().plus(120, ChronoUnit.MINUTES));
+        audit.log("LOGIN_SUCCESS", user, deviceId, ip, userAgent);
+
+        return new TokenPair("Bearer", access, rt.getToken(),
+                Instant.now().plusMillis(jwtService.getAccessExpMs()));
     }
 
     @Transactional
-    public AuthController.TokenPair rotate(String refreshToken, String deviceId, String userAgent, String ip) {
+    public TokenPair rotate(String refreshToken, String deviceId, String userAgent, String ip) {
         RefreshToken old = rtRepo.findByTokenAndRevokedFalse(refreshToken)
                 .orElseThrow(() -> new BadCredentialsException("Invalid refresh token"));
 
-        // Device tekshiruvi
-        if (!old.getDeviceId().equals(deviceId)) {
+        if (old.getExpiresAt().isBefore(Instant.now())) {
             old.setRevoked(true);
             rtRepo.save(old);
+            throw new BadCredentialsException("Refresh token expired");
+        }
+
+        // Device binding
+        if (old.getDeviceId() != null && deviceId != null && !old.getDeviceId().equals(deviceId)) {
+            old.setRevoked(true);
+            rtRepo.save(old);
+            audit.log("SESSION_REJECTED", old.getUser(), deviceId, ip, userAgent);
             throw new BadCredentialsException("Refresh token device mismatch");
         }
 
         // UA binding
-        if (uaBindingEnabled) {
-            if (!uaMatches(old.getUserAgent(), userAgent)) {
-                old.setRevoked(true);
-                rtRepo.save(old);
-                throw new BadCredentialsException("User-Agent mismatch for refresh token");
-            }
+        if (uaBindingEnabled && !uaMatches(old.getUserAgent(), userAgent)) {
+            old.setRevoked(true);
+            rtRepo.save(old);
+            audit.log("SESSION_REJECTED", old.getUser(), deviceId, ip, userAgent);
+            throw new BadCredentialsException("User-Agent mismatch for refresh token");
         }
 
         // IP binding
@@ -99,43 +135,48 @@ public class SessionService {
             if (savedIp == null || !savedIp.equals(ip)) {
                 old.setRevoked(true);
                 rtRepo.save(old);
+                audit.log("SESSION_REJECTED", old.getUser(), deviceId, ip, userAgent);
                 throw new BadCredentialsException("IP mismatch for refresh token");
             }
         }
 
-        if (old.getExpiresAt().isBefore(Instant.now())) {
-            old.setRevoked(true);
-            rtRepo.save(old);
-            throw new BadCredentialsException("Refresh token expired");
-        }
-
         AppUser user = old.getUser();
-        Long orgId = user.getOrg() != null ? user.getOrg().getId() : null;
-
-        // Rotation
-        old.setRevoked(true);
-        String newRtStr = UUID.randomUUID().toString();
-        old.setReplacedByToken(newRtStr);
-        rtRepo.save(old);
-
-        RefreshToken nu = RefreshToken.builder()
-                .token(newRtStr)
-                .user(user)
-                .deviceId(deviceId)
-                .userAgent(userAgent)
-                .ip(ip)
-                .expiresAt(Instant.now().plus(refreshExpSeconds, ChronoUnit.SECONDS))
-                .revoked(false)
-                .build();
-        rtRepo.save(nu);
-
+        Long orgId = user.getOrgUnit() != null ? user.getOrgUnit().getId() : null;
         String newAccess = jwtService.generateAccessToken(user.getUsername(), user.getRole(), orgId);
 
-        online.ping(user.getId(), deviceId);
-        rtRepo.touchLastSeen(user.getId(), deviceId, Instant.now());
+        if (rotateOnRefresh) {
+            // Rotation
+            old.setRevoked(true);
+            String newRtStr = UUID.randomUUID().toString();
+            old.setReplacedByToken(newRtStr);
+            rtRepo.save(old);
 
-        return new AuthController.TokenPair("Bearer", newAccess, nu.getToken(),
-                Instant.now().plus(120, ChronoUnit.MINUTES));
+            RefreshToken nu = RefreshToken.builder()
+                    .token(newRtStr)
+                    .user(user)
+                    .deviceId(deviceId)
+                    .userAgent(userAgent)
+                    .ip(ip)
+                    .expiresAt(Instant.now().plus(refreshExpSeconds, ChronoUnit.SECONDS))
+                    .revoked(false)
+                    .build();
+            rtRepo.save(nu);
+
+            online.ping(user.getId(), deviceId);
+            rtRepo.touchLastSeen(user.getId(), deviceId, Instant.now());
+            audit.log("REFRESH_ROTATE", user, deviceId, ip, userAgent);
+
+            return new TokenPair("Bearer", newAccess, nu.getToken(),
+                    Instant.now().plusMillis(jwtService.getAccessExpMs()));
+        } else {
+            // Reuse
+            online.ping(user.getId(), deviceId);
+            rtRepo.touchLastSeen(user.getId(), deviceId, Instant.now());
+            audit.log("REFRESH_REUSE", user, deviceId, ip, userAgent);
+
+            return new TokenPair("Bearer", newAccess, old.getToken(),
+                    Instant.now().plusMillis(jwtService.getAccessExpMs()));
+        }
     }
 
     @Transactional
@@ -143,7 +184,25 @@ public class SessionService {
         rtRepo.findByTokenAndRevokedFalse(refreshToken).ifPresent(t -> {
             t.setRevoked(true);
             rtRepo.save(t);
+            audit.log("LOGOUT", t.getUser(), t.getDeviceId(), t.getIp(), t.getUserAgent());
         });
+    }
+
+    @Transactional
+    public void revokeDevice(Long userId, String deviceId) {
+        List<RefreshToken> tokens = rtRepo.findAllByUser_IdAndRevokedFalse(userId);
+        for (RefreshToken t : tokens) {
+            if (deviceId.equals(t.getDeviceId())) {
+                t.setRevoked(true);
+                rtRepo.save(t);
+                audit.log("SESSION_REVOKE", t.getUser(), deviceId, t.getIp(), t.getUserAgent());
+            }
+        }
+    }
+
+    @Transactional
+    public void revokeAllOtherDevices(Long userId, String keepDeviceId) {
+        rtRepo.revokeAllOtherDevices(userId, keepDeviceId);
     }
 
     @Transactional
@@ -152,20 +211,8 @@ public class SessionService {
         rtRepo.touchLastSeen(userId, deviceId, Instant.now());
     }
 
-    public int onlineCount() {
-        return online.getOnlineCount();
-    }
+    // ===== Helpers =====
 
-    public List<RefreshToken> listActiveSessions() {
-        return rtRepo.findAllByRevokedFalse();
-    }
-
-    @Transactional
-    public void revokeAllForUser(Long userId) {
-        rtRepo.revokeAllByUserId(userId);
-    }
-
-    // ==== UA helperlar ====
     private boolean uaMatches(String stored, String incoming) {
         if (stored == null || incoming == null) return false;
         String mode = uaBindingMode == null ? "strict" : uaBindingMode.toLowerCase();
@@ -177,9 +224,22 @@ public class SessionService {
     }
 
     private String normalizeUa(String ua) {
-        // '(' dan oldingi prefiksni olib, bo'shliqlarni siqamiz
         int i = ua.indexOf('(');
         if (i > 0) ua = ua.substring(0, i);
         return ua.replaceAll("\\s+", " ").trim();
+    }
+
+    public List<RefreshToken> listSessions(Long userId, boolean includeRevoked, boolean includeExpired) {
+        List<RefreshToken> base = includeRevoked
+                ? rtRepo.findAllByUser_Id(userId)
+                : rtRepo.findAllByUser_IdAndRevokedFalse(userId);
+
+        Instant now = Instant.now();
+        if (!includeExpired) {
+            base = base.stream()
+                    .filter(t -> t.getExpiresAt() != null && t.getExpiresAt().isAfter(now))
+                    .toList();
+        }
+        return base;
     }
 }

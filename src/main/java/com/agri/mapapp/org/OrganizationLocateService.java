@@ -3,7 +3,9 @@ package com.agri.mapapp.org;
 import com.agri.mapapp.facility.Facility;
 import com.agri.mapapp.facility.FacilityRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.*;
 
@@ -19,14 +21,14 @@ public class OrganizationLocateService {
         return locateByCode(code, null);
     }
 
-    /** YANGI: allowed scope bilan (non-admin foydalanuvchilar uchun) */
+    /** allowed scope bilan (non-admin foydalanuvchilar uchun) */
     public OrgLocateResponse locateByCode(String code, Set<Long> allowed) {
         OrganizationUnit org = orgRepo.findByCode(code.trim())
-                .orElseThrow(() -> new NoSuchElementException("Org not found by code: " + code));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found by code: " + code));
 
-        // Agar scope berilgan bo‘lsa va foydalanuvchi ushbu org’ga kira olmasa — 404/deny
+        // ❗ Ruxsat tekshiruvi: non-admin foydalanuvchi begona org uchun 403
         if (allowed != null && !allowed.contains(org.getId())) {
-            throw new NoSuchElementException("Org not accessible by code: " + code);
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Org not accessible by code: " + code);
         }
 
         // Avlodlarini IDs ko‘rinishida yig‘ish

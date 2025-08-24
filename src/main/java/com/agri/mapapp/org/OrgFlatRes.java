@@ -1,4 +1,3 @@
-// src/main/java/com/agri/mapapp/org/OrgFlatRes.java
 package com.agri.mapapp.org;
 
 import lombok.*;
@@ -6,6 +5,7 @@ import lombok.*;
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class OrgFlatRes {
     private Long id;
+    private String code;      // ✅ code qo‘shildi
     private String name;
     private Long parentId;
     private String parentName;
@@ -19,6 +19,7 @@ public class OrgFlatRes {
     public static OrgFlatRes of(OrganizationUnit u, String parentName, int depth, boolean hasChildren) {
         return OrgFlatRes.builder()
                 .id(u.getId())
+                .code(u.getCode()) // ✅ code to‘ldirildi
                 .name(u.getName())
                 .parentId(u.getParent() != null ? u.getParent().getId() : null)
                 .parentName(parentName)

@@ -31,7 +31,7 @@ public class FacilityController {
 
     /**
      * Paginatsiyadagi ro‘yxat.
-     * Foydalanuvchi scope’i (ADMIN => hammasi, ORG_USER => subtree) majburan qo‘llanadi.
+     * Foydalanuvchi scope’i (ADMIN => hammasi, USER => subtree) majburan qo‘llanadi.
      */
     @GetMapping
     public PageResponse<FacilityRes> list(
@@ -42,7 +42,7 @@ public class FacilityController {
             @RequestParam(required = false) String q,
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
-        Set<Long> allowed = accessService.allowedOrgIds(auth); // ADMIN -> null, ORG_USER -> subtree ids
+        Set<Long> allowed = accessService.allowedOrgIds(auth); // ADMIN -> null, USER -> subtree ids
         // Agar foydalanuvchi aniq orgId so‘rasa va bu orgId uning scope’iga kirmasa — rad etamiz
         if (orgId != null && allowed != null && !allowed.contains(orgId)) {
             throw new AccessDeniedException("Siz ushbu bo‘lim obyektlarini ko‘ra olmaysiz.");

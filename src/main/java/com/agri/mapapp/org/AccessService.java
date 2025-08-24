@@ -18,7 +18,7 @@ public class AccessService {
         UserPrincipal up = (UserPrincipal) auth.getPrincipal();
         if (up.getRole() == Role.ADMIN) return null; // null -> cheklanmagan (ADMIN)
         Long rootId = up.getOrgId();
-        if (rootId == null) return Set.of(); // org biriktirilmagan ORG_USER
+        if (rootId == null) return Set.of(); // org biriktirilmagan USER
         // barcha orglarni olib, subtree ni hisoblaymiz (oddiy DFS)
         List<OrganizationUnit> all = repo.findAll();
         Map<Long, List<Long>> children = new HashMap<>();

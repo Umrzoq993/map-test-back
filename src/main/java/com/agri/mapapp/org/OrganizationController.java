@@ -20,8 +20,8 @@ import java.util.Set;
 public class OrganizationController {
     private final OrganizationService service;
     private final AccessService access;
-    // Qo‘shimcha: map qidiruv uchun (kod -> org + facilities + viewport)
     private final OrganizationLocateService locateService;
+    private final OrganizationUnitRepository repo;
 
     @GetMapping("/tree")
     public ResponseEntity<List<OrgNodeDto>> tree(Authentication auth) {
@@ -43,15 +43,22 @@ public class OrganizationController {
         return ResponseEntity.ok(service.findPageForUser(q, parentId, pageable, allowed));
     }
 
-    // --- YANGI: Org’ni code bo‘yicha topish (yengil DTO) ---
+    // --- Code bo‘yicha topish: endi ruxsatni ham tekshiradi ---
     @GetMapping("/by-code/{code}")
-    public ResponseEntity<OrgDto> getByCode(@PathVariable String code) {
+    public ResponseEntity<OrgDto> getByCode(Authentication auth, @PathVariable String code) {
         var org = service.findByCode(code)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
+        var up = (UserPrincipal) auth.getPrincipal();
+        if (up.getRole() != Role.ADMIN) {
+            Set<Long> allowed = access.allowedOrgIds(auth);
+            if (allowed == null || !allowed.contains(org.getId())) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Org not accessible by code: " + code);
+            }
+        }
         return ResponseEntity.ok(OrgDto.from(org));
     }
 
-    // --- YANGI: Map uchun locate (org + avlodlari resurslari + viewport) ---
+    // --- Map uchun locate (org + avlodlari resurslari + viewport), scope-aware ---
     @GetMapping("/locate")
     public ResponseEntity<OrgLocateResponse> locate(Authentication auth, @RequestParam("code") String code) {
         var up = (UserPrincipal) auth.getPrincipal();
@@ -61,13 +68,20 @@ public class OrganizationController {
         return ResponseEntity.ok(resp);
     }
 
+    // --- ID bo‘yicha olish (select label uchun, admin-scope emas, lekin mavjud resurs) ---
+    @GetMapping("/{id}")
+    public ResponseEntity<OrgDto> getById(@PathVariable Long id) {
+        var u = repo.findById(id).orElseThrow(() ->
+                new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found: " + id));
+        return ResponseEntity.ok(OrgDto.from(u));
+    }
+
     // CREATE
     @PostMapping
     public ResponseEntity<OrgFlatRes> create(Authentication auth, @RequestBody CreateOrgReq req) {
         var up = (UserPrincipal) auth.getPrincipal();
         if (up.getRole() != Role.ADMIN) {
             Long pid = req.getParentId();
-            // Root ostiga yaratishga ham faqat o‘z subtree ichida ruxsat (root uchun pid=null -> deny)
             if (pid == null || !access.canAccessOrg(auth, pid)) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
@@ -80,7 +94,6 @@ public class OrganizationController {
     // UPDATE
     @PatchMapping("/{id}")
     public ResponseEntity<OrgFlatRes> update(Authentication auth, @PathVariable Long id, @RequestBody UpdateOrgReq req) {
-        // Tahrirlashdan oldin shu tugun foydalanuvchi doirasida ekanligini tekshiramiz
         if (!access.canAccessOrg(auth, id) && ((UserPrincipal)auth.getPrincipal()).getRole()!=Role.ADMIN) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
@@ -127,7 +140,6 @@ public class OrganizationController {
         private Long newParentId; private Integer orderIndex;
     }
 
-    // YENGIL javob (by-code uchun). Frontendga kerak bo‘lgan minimal maydonlar:
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
     public static class OrgDto {
         private Long id;
