@@ -40,7 +40,7 @@ public class FacilityController {
             @RequestParam(required = false) FacilityType type,
             @RequestParam(required = false) FacilityStatus status,
             @RequestParam(required = false) String q,
-            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
+            @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         Set<Long> allowed = accessService.allowedOrgIds(auth); // ADMIN -> null, USER -> subtree ids
         // Agar foydalanuvchi aniq orgId so‘rasa va bu orgId uning scope’iga kirmasa — rad etamiz
