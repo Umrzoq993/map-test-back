@@ -27,7 +27,7 @@ public class AuditController {
     @GetMapping
     public ResponseEntity<PageResponse<AuditRes>> list(
             @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) int size,
+            @RequestParam(defaultValue = "10") @Min(1) int size,
             @RequestParam(defaultValue = "ts,desc") String sort,
             @RequestParam(required = false) Long userId,
             @RequestParam(required = false) String deviceId,
