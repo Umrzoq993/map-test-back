@@ -1,32 +1,47 @@
+// src/main/java/com/agri/mapapp/auth/RefreshTokenRepository.java
 package com.agri.mapapp.auth;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+@Repository
 public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long> {
 
     Optional<RefreshToken> findByTokenAndRevokedFalse(String token);
 
-    Optional<RefreshToken> findByUser_IdAndDeviceIdAndRevokedFalse(Long userId, String deviceId);
+    List<RefreshToken> findAllByUser_Id(Long userId);
 
     List<RefreshToken> findAllByUser_IdAndRevokedFalse(Long userId);
 
-    // Barcha sessiyalar (revoked bo‘lsa ham)
-    List<RefreshToken> findAllByUser_Id(Long userId);
+    @Modifying
+    @Query("update RefreshToken r set r.revoked = true where r.user.id = :userId")
+    void revokeAllByUserId(@Param("userId") Long userId);
 
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query("update RefreshToken rt set rt.revoked = true where rt.user.id = :userId and rt.revoked = false")
-    int revokeAllByUserId(@Param("userId") Long userId);
+    @Modifying
+    @Query("update RefreshToken r set r.lastSeenAt = :ts where r.user.id = :userId and r.deviceId = :deviceId")
+    void touchLastSeen(@Param("userId") Long userId, @Param("deviceId") String deviceId, @Param("ts") Instant ts);
 
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query("update RefreshToken rt set rt.revoked = true where rt.user.id = :userId and rt.deviceId <> :deviceId and rt.revoked = false")
-    int revokeAllOtherDevices(@Param("userId") Long userId, @Param("deviceId") String deviceId);
+    @Modifying
+    @Query("update RefreshToken r set r.revoked = true where r.user.id = :userId and r.deviceId <> :keepDeviceId")
+    void revokeAllOtherDevices(@Param("userId") Long userId, @Param("keepDeviceId") String keepDeviceId);
 
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query("update RefreshToken rt set rt.lastSeenAt = :ts where rt.user.id = :userId and rt.deviceId = :deviceId and rt.revoked = false")
-    int touchLastSeen(@Param("userId") Long userId, @Param("deviceId") String deviceId, @Param("ts") Instant ts);
+    /** ✅ Paging + filtrlash (revoked/expired) */
+    @Query("""
+           select r from RefreshToken r
+           where r.user.id = :userId
+             and (:includeRevoked = true or r.revoked = false)
+             and (:includeExpired = true or r.expiresAt > :now)
+           """)
+    Page<RefreshToken> findSessions(@Param("userId") Long userId,
+                                    @Param("includeRevoked") boolean includeRevoked,
+                                    @Param("includeExpired") boolean includeExpired,
+                                    @Param("now") Instant now,
+                                    Pageable pageable);
 }

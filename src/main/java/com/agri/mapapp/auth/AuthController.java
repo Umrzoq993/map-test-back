@@ -1,12 +1,15 @@
+// src/main/java/com/agri/mapapp/auth/AuthController.java
 package com.agri.mapapp.auth;
 
-import com.agri.mapapp.audit.AuditService;
+import com.agri.mapapp.common.PageResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
+import org.springframework.data.domain.*;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -22,7 +25,6 @@ import java.util.Map;
 public class AuthController {
 
     private final SessionService sessions;
-    private final AuditService audit;
     private final OnlineUserTracker online;
     private final AppUserRepository userRepo;
 
@@ -125,11 +127,20 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("ok", true));
     }
 
+    /**
+     * ✅ Paged sessions API
+     * GET /api/auth/sessions?includeRevoked=true&includeExpired=false&page=0&size=10&sort=lastSeenAt,desc
+     */
     @GetMapping("/sessions")
-    public ResponseEntity<List<SessionView>> mySessions(@AuthenticationPrincipal UserPrincipal principal,
-                                                        @RequestParam(name = "userId", required = false) Long userId,
-                                                        @RequestParam(name = "includeRevoked", defaultValue = "false") boolean includeRevoked,
-                                                        @RequestParam(name = "includeExpired", defaultValue = "false") boolean includeExpired) {
+    public ResponseEntity<PageResponse<SessionView>> mySessions(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(name = "userId", required = false) Long userId,
+            @RequestParam(name = "includeRevoked", defaultValue = "false") boolean includeRevoked,
+            @RequestParam(name = "includeExpired", defaultValue = "false") boolean includeExpired,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "10") @Min(1) int size,
+            @RequestParam(defaultValue = "lastSeenAt,desc") String sort
+    ) {
         Long uid = userId;
         if (uid == null) {
             if (principal == null) return ResponseEntity.status(401).build();
@@ -137,19 +148,31 @@ public class AuthController {
             uid = u.getId();
         }
 
-        List<RefreshToken> list = sessions.listSessions(uid, includeRevoked, includeExpired);
-        List<SessionView> out = list.stream().map(rt -> new SessionView(
-                rt.getDeviceId(),
-                rt.getIp(),
-                rt.getUserAgent(),
-                rt.getCreatedAt(),
-                rt.getLastSeenAt(),
-                rt.getExpiresAt(),
-                rt.isRevoked(),
-                tokenSuffix(rt.getToken())
-        )).toList();
+        Pageable pageable = PageRequest.of(page, size, parseSort(sort));
+        Page<RefreshToken> pg = sessions.listSessionsPage(uid, includeRevoked, includeExpired, pageable);
 
-        return ResponseEntity.ok(out);
+        List<SessionView> content = pg.getContent().stream()
+                .map(rt -> new SessionView(
+                        rt.getDeviceId(),
+                        rt.getIp(),
+                        rt.getUserAgent(),
+                        rt.getCreatedAt(),
+                        rt.getLastSeenAt(),
+                        rt.getExpiresAt(),
+                        rt.isRevoked(),
+                        tokenSuffix(rt.getToken())
+                ))
+                .toList();
+
+        PageResponse<SessionView> resp = new PageResponse<>(
+                content,
+                pg.getNumber(),
+                pg.getSize(),
+                pg.getTotalElements(),
+                pg.getTotalPages(),
+                pg.isLast()
+        );
+        return ResponseEntity.ok(resp);
     }
 
     @PostMapping("/sessions/revoke-others")
@@ -171,5 +194,15 @@ public class AuthController {
     public ResponseEntity<Map<String, Object>> onlineCount() {
         int n = online.getOnlineCount();
         return ResponseEntity.ok(Map.of("online", n));
+    }
+
+    private Sort parseSort(String sort) {
+        // format: "field,dir" yoki "field" (default: lastSeenAt desc)
+        if (sort == null || sort.isBlank()) return Sort.by(Sort.Order.desc("lastSeenAt"));
+        String[] parts = sort.split(",");
+        String field = parts[0].trim();
+        String dir = parts.length > 1 ? parts[1].trim().toLowerCase() : "desc";
+        if (dir.startsWith("asc")) return Sort.by(Sort.Order.asc(field));
+        return Sort.by(Sort.Order.desc(field));
     }
 }

@@ -1,9 +1,12 @@
+// src/main/java/com/agri/mapapp/auth/SessionService.java
 package com.agri.mapapp.auth;
 
 import com.agri.mapapp.audit.AuditService;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -211,8 +214,27 @@ public class SessionService {
         rtRepo.touchLastSeen(userId, deviceId, Instant.now());
     }
 
-    // ===== Helpers =====
+    /** ✅ DB darajasida pagination bilan sessiyalar */
+    public Page<RefreshToken> listSessionsPage(Long userId, boolean includeRevoked, boolean includeExpired, Pageable pageable) {
+        return rtRepo.findSessions(userId, includeRevoked, includeExpired, Instant.now(), pageable);
+    }
 
+    // ===== Legacy (list) — mavjud kodni saqlab turamiz =====
+    public List<RefreshToken> listSessions(Long userId, boolean includeRevoked, boolean includeExpired) {
+        List<RefreshToken> base = includeRevoked
+                ? rtRepo.findAllByUser_Id(userId)
+                : rtRepo.findAllByUser_IdAndRevokedFalse(userId);
+
+        Instant now = Instant.now();
+        if (!includeExpired) {
+            base = base.stream()
+                    .filter(t -> t.getExpiresAt() != null && t.getExpiresAt().isAfter(now))
+                    .toList();
+        }
+        return base;
+    }
+
+    // ===== Helpers =====
     private boolean uaMatches(String stored, String incoming) {
         if (stored == null || incoming == null) return false;
         String mode = uaBindingMode == null ? "strict" : uaBindingMode.toLowerCase();
@@ -227,19 +249,5 @@ public class SessionService {
         int i = ua.indexOf('(');
         if (i > 0) ua = ua.substring(0, i);
         return ua.replaceAll("\\s+", " ").trim();
-    }
-
-    public List<RefreshToken> listSessions(Long userId, boolean includeRevoked, boolean includeExpired) {
-        List<RefreshToken> base = includeRevoked
-                ? rtRepo.findAllByUser_Id(userId)
-                : rtRepo.findAllByUser_IdAndRevokedFalse(userId);
-
-        Instant now = Instant.now();
-        if (!includeExpired) {
-            base = base.stream()
-                    .filter(t -> t.getExpiresAt() != null && t.getExpiresAt().isAfter(now))
-                    .toList();
-        }
-        return base;
     }
 }
