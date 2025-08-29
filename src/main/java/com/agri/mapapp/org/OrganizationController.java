@@ -1,3 +1,4 @@
+// src/main/java/com/agri/mapapp/org/OrganizationController.java
 package com.agri.mapapp.org;
 
 import com.agri.mapapp.auth.Role;
@@ -21,6 +22,7 @@ public class OrganizationController {
     private final OrganizationService service;
     private final AccessService access;
     private final OrganizationLocateService locateService;
+    private final OrganizationDetailsService detailsService; // ✅ YANGI
     private final OrganizationUnitRepository repo;
 
     @GetMapping("/tree")
@@ -74,6 +76,18 @@ public class OrganizationController {
         var u = repo.findById(id).orElseThrow(() ->
                 new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found: " + id));
         return ResponseEntity.ok(OrgDto.from(u));
+    }
+
+    // ✅ YANGI: ID bo‘yicha batafsil (breadcrumb, siblings, children, stats, viewport, facilities)
+    @GetMapping("/{id}/details")
+    public ResponseEntity<OrgDetailsResponse> details(Authentication auth, @PathVariable Long id) {
+        var up = (UserPrincipal) auth.getPrincipal();
+        Set<Long> scope = (up.getRole() == Role.ADMIN) ? null : access.allowedOrgIds(auth);
+        if (scope != null && !scope.contains(id)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        OrgDetailsResponse res = detailsService.getDetails(id, scope);
+        return ResponseEntity.ok(res);
     }
 
     // CREATE
