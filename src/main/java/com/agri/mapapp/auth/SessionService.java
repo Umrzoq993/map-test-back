@@ -14,10 +14,15 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HexFormat;
 import java.util.List;
-import java.util.UUID;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -51,8 +56,37 @@ public class SessionService {
     @Value("${app.security.sessions.single-device.policy:REVOKE_OLD}")
     private String singleDevicePolicy;
 
+    @Value("${app.security.refresh.hash-salt:change-me-salt}")
+    private String hashSalt;
+
+    @Value("${app.security.sessions.max-active:20}")
+    private int maxActiveSessions;
+
+    private static final SecureRandom RNG = new SecureRandom();
+
+    public record AuthTokens(String accessToken, Instant accessExpiresAt, String refreshToken, Instant refreshExpiresAt, AppUser user) {}
+
+    public long getRefreshExpSeconds() { return refreshExpSeconds; }
+
+    private String newRefreshTokenValue() {
+        byte[] buf = new byte[32]; // 256-bit
+        RNG.nextBytes(buf);
+        return HexFormat.of().withUpperCase().formatHex(buf);
+    }
+
+    private String hash(String raw) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            md.update(Objects.requireNonNullElse(hashSalt, "").getBytes(StandardCharsets.UTF_8));
+            byte[] digest = md.digest(raw.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().withUpperCase().formatHex(digest);
+        } catch (Exception e) {
+            throw new IllegalStateException("Hash error", e);
+        }
+    }
+
     @Transactional
-    public TokenPair loginIssueTokens(String username, String password,
+    public AuthTokens loginIssueTokens(String username, String password,
                                       String deviceId, String userAgent, String ip) {
         Authentication auth = authManager.authenticate(
                 new UsernamePasswordAuthenticationToken(username, password));
@@ -82,38 +116,67 @@ public class SessionService {
             }
         }
 
+        // Parallel sessiyalar limitini majburlash (eng eskilarini revoke)
+        if (maxActiveSessions > 0) {
+            Instant nowTs = Instant.now();
+            List<RefreshToken> actives = rtRepo.findAllByUser_IdAndRevokedFalseOrderByCreatedAtAsc(user.getId())
+                    .stream().filter(t -> t.getExpiresAt().isAfter(nowTs))
+                    .collect(Collectors.toList());
+            int toRevoke = actives.size() - (maxActiveSessions - 1); // yangi sessiyaga joy qoldiramiz
+            for (int i = 0; i < toRevoke; i++) {
+                RefreshToken t = actives.get(i);
+                t.setRevoked(true);
+                rtRepo.save(t);
+                audit.log("SESSION_REVOKE_OVER_CAP", t.getUser(), t.getDeviceId(), t.getIp(), t.getUserAgent());
+            }
+        }
+
+        String rtPlain = newRefreshTokenValue();
+        String rtHash = hash(rtPlain);
+        Instant now = Instant.now();
         RefreshToken rt = RefreshToken.builder()
-                .token(UUID.randomUUID().toString())
+                .token(rtHash) // fill legacy non-null column with hash to satisfy DB constraint
+                .tokenHash(rtHash)
                 .user(user)
                 .deviceId(deviceId)
                 .userAgent(userAgent)
                 .ip(ip)
-                .expiresAt(Instant.now().plus(refreshExpSeconds, ChronoUnit.SECONDS))
+                .expiresAt(now.plus(refreshExpSeconds, ChronoUnit.SECONDS))
                 .revoked(false)
                 .build();
         rtRepo.save(rt);
 
         Long orgId = user.getOrgUnit() != null ? user.getOrgUnit().getId() : null;
-        String access = jwtService.generateAccessToken(user.getUsername(), user.getRole(), orgId);
+        String access = jwtService.generateAccessToken(user.getUsername(), user.getRole(), orgId, deviceId);
 
         online.ping(user.getId(), deviceId);
-        rtRepo.touchLastSeen(user.getId(), deviceId, Instant.now());
+        rtRepo.touchLastSeen(user.getId(), deviceId, now);
 
         audit.log("LOGIN_SUCCESS", user, deviceId, ip, userAgent);
 
-        return new TokenPair("Bearer", access, rt.getToken(),
-                Instant.now().plusMillis(jwtService.getAccessExpMs()));
+        return new AuthTokens(access, Instant.now().plusMillis(jwtService.getAccessExpMs()), rtPlain, rt.getExpiresAt(), user);
     }
 
     @Transactional
-    public TokenPair rotate(String refreshToken, String deviceId, String userAgent, String ip) {
-        RefreshToken old = rtRepo.findByTokenAndRevokedFalse(refreshToken)
-                .orElseThrow(() -> new BadCredentialsException("Invalid refresh token"));
+    public AuthTokens rotate(String refreshTokenPlain, String deviceId, String userAgent, String ip) {
+        String tokenHash = hash(refreshTokenPlain);
+        RefreshToken old = rtRepo.findByTokenHash(tokenHash)
+                .orElseGet(() -> rtRepo.findByToken(refreshTokenPlain).orElse(null));
+        if (old == null) {
+            throw new AuthException("REFRESH_INVALID", "Invalid refresh token");
+        }
+
+        // Replay detektsiya: agar oldindan revoke qilingan bo'lsa, hammasini bekor qilish
+        if (old.isRevoked()) {
+            rtRepo.revokeAllByUserId(old.getUser().getId());
+            audit.log("REFRESH_REPLAY", old.getUser(), deviceId, ip, userAgent);
+            throw new AuthException("REFRESH_REPLAY", "Refresh token replay detected");
+        }
 
         if (old.getExpiresAt().isBefore(Instant.now())) {
             old.setRevoked(true);
             rtRepo.save(old);
-            throw new BadCredentialsException("Refresh token expired");
+            throw new AuthException("REFRESH_EXPIRED", "Refresh token expired");
         }
 
         // Device binding
@@ -121,7 +184,7 @@ public class SessionService {
             old.setRevoked(true);
             rtRepo.save(old);
             audit.log("SESSION_REJECTED", old.getUser(), deviceId, ip, userAgent);
-            throw new BadCredentialsException("Refresh token device mismatch");
+            throw new AuthException("REFRESH_INVALID", "Device mismatch");
         }
 
         // UA binding
@@ -129,62 +192,65 @@ public class SessionService {
             old.setRevoked(true);
             rtRepo.save(old);
             audit.log("SESSION_REJECTED", old.getUser(), deviceId, ip, userAgent);
-            throw new BadCredentialsException("User-Agent mismatch for refresh token");
+            throw new AuthException("REFRESH_INVALID", "User-Agent mismatch");
         }
 
         // IP binding
         if (ipBindingEnabled) {
             String savedIp = old.getIp();
-            if (savedIp == null || !savedIp.equals(ip)) {
+            if (!Objects.equals(savedIp, ip)) {
                 old.setRevoked(true);
                 rtRepo.save(old);
                 audit.log("SESSION_REJECTED", old.getUser(), deviceId, ip, userAgent);
-                throw new BadCredentialsException("IP mismatch for refresh token");
+                throw new AuthException("REFRESH_INVALID", "IP mismatch");
             }
         }
 
         AppUser user = old.getUser();
         Long orgId = user.getOrgUnit() != null ? user.getOrgUnit().getId() : null;
-        String newAccess = jwtService.generateAccessToken(user.getUsername(), user.getRole(), orgId);
+        String newAccess = jwtService.generateAccessToken(user.getUsername(), user.getRole(), orgId, deviceId);
 
+        Instant now = Instant.now();
         if (rotateOnRefresh) {
             // Rotation
             old.setRevoked(true);
-            String newRtStr = UUID.randomUUID().toString();
-            old.setReplacedByToken(newRtStr);
+            String newRtPlain = newRefreshTokenValue();
+            String newRtHash = hash(newRtPlain);
+            old.setReplacedByTokenHash(newRtHash);
             rtRepo.save(old);
 
             RefreshToken nu = RefreshToken.builder()
-                    .token(newRtStr)
+                    .token(newRtHash) // fill legacy non-null column with hash
+                    .tokenHash(newRtHash)
                     .user(user)
                     .deviceId(deviceId)
                     .userAgent(userAgent)
                     .ip(ip)
-                    .expiresAt(Instant.now().plus(refreshExpSeconds, ChronoUnit.SECONDS))
+                    .expiresAt(now.plus(refreshExpSeconds, ChronoUnit.SECONDS))
                     .revoked(false)
                     .build();
             rtRepo.save(nu);
 
             online.ping(user.getId(), deviceId);
-            rtRepo.touchLastSeen(user.getId(), deviceId, Instant.now());
+            rtRepo.touchLastSeen(user.getId(), deviceId, now);
             audit.log("REFRESH_ROTATE", user, deviceId, ip, userAgent);
 
-            return new TokenPair("Bearer", newAccess, nu.getToken(),
-                    Instant.now().plusMillis(jwtService.getAccessExpMs()));
+            return new AuthTokens(newAccess, Instant.now().plusMillis(jwtService.getAccessExpMs()), newRtPlain, nu.getExpiresAt(), user);
         } else {
             // Reuse
             online.ping(user.getId(), deviceId);
-            rtRepo.touchLastSeen(user.getId(), deviceId, Instant.now());
+            rtRepo.touchLastSeen(user.getId(), deviceId, now);
             audit.log("REFRESH_REUSE", user, deviceId, ip, userAgent);
 
-            return new TokenPair("Bearer", newAccess, old.getToken(),
-                    Instant.now().plusMillis(jwtService.getAccessExpMs()));
+            // Reuse holatida refresh token o'zgarmaydi
+            return new AuthTokens(newAccess, Instant.now().plusMillis(jwtService.getAccessExpMs()), refreshTokenPlain, old.getExpiresAt(), user);
         }
     }
 
     @Transactional
-    public void logout(String refreshToken) {
-        rtRepo.findByTokenAndRevokedFalse(refreshToken).ifPresent(t -> {
+    public void logout(String refreshTokenPlain) {
+        String tokenHash = hash(refreshTokenPlain);
+        rtRepo.findByTokenHash(tokenHash).or(() -> rtRepo.findByToken(refreshTokenPlain)).ifPresent(t -> {
             t.setRevoked(true);
             rtRepo.save(t);
             audit.log("LOGOUT", t.getUser(), t.getDeviceId(), t.getIp(), t.getUserAgent());
@@ -210,6 +276,15 @@ public class SessionService {
 
     @Transactional
     public void heartbeat(Long userId, String deviceId) {
+        if (deviceId == null || deviceId.isBlank()) return; // nothing to check
+        var opt = rtRepo.findFirstByUser_IdAndDeviceIdOrderByCreatedAtDesc(userId, deviceId);
+        if (opt.isEmpty()) {
+            throw new AuthException("SESSION_REVOKED", "No active session for device");
+        }
+        RefreshToken rt = opt.get();
+        if (rt.isRevoked() || (rt.getExpiresAt() != null && rt.getExpiresAt().isBefore(Instant.now()))) {
+            throw new AuthException("SESSION_REVOKED", "Session expired or revoked");
+        }
         online.ping(userId, deviceId);
         rtRepo.touchLastSeen(userId, deviceId, Instant.now());
     }

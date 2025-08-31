@@ -7,7 +7,7 @@ import java.time.Instant;
 
 @Entity
 @Table(name = "refresh_token", indexes = {
-        @Index(name = "ix_refresh_token_token", columnList = "token", unique = true),
+        @Index(name = "ix_refresh_token_token_hash", columnList = "token_hash", unique = true),
         @Index(name = "ix_refresh_token_user", columnList = "user_id"),
         @Index(name = "ix_refresh_token_user_device", columnList = "user_id,device_id")
 })
@@ -22,9 +22,13 @@ public class RefreshToken {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** Random UUID string */
-    @Column(nullable = false, unique = true, length = 64)
+    /** Legacy raw token (no longer used). Keep nullable for backward-compat */
+    @Column(name = "token", length = 64)
     private String token;
+
+    /** Hash of refresh token value (e.g., sha256(salt+token)) */
+    @Column(name = "token_hash", unique = true, length = 128)
+    private String tokenHash;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false)
@@ -45,9 +49,9 @@ public class RefreshToken {
     @Column(nullable = false)
     private boolean revoked;
 
-    /** Rotation paytida qaysi token o‘rniga chiqqani (audit uchun) */
-    @Column(name = "replaced_by_token", length = 64)
-    private String replacedByToken;
+    /** Rotation paytida qaysi token o‘rniga chiqqani (audit uchun, hash qiymati) */
+    @Column(name = "replaced_by_token_hash", length = 128)
+    private String replacedByTokenHash;
 
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
@@ -61,7 +65,7 @@ public class RefreshToken {
         Instant now = Instant.now();
         if (createdAt == null) createdAt = now;
         if (lastSeenAt == null) lastSeenAt = now;
-        if (revoked == false && expiresAt != null && expiresAt.isBefore(now)) {
+        if (!revoked && expiresAt != null && expiresAt.isBefore(now)) {
             revoked = true; // ehtiyot chorasi
         }
     }

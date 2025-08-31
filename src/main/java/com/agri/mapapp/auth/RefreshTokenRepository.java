@@ -14,11 +14,19 @@ import java.util.Optional;
 @Repository
 public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long> {
 
+    // Hashed lookups (new)
+    Optional<RefreshToken> findByTokenHashAndRevokedFalse(String tokenHash);
+    Optional<RefreshToken> findByTokenHash(String tokenHash);
+
+    // Legacy raw token lookups (for migration)
     Optional<RefreshToken> findByTokenAndRevokedFalse(String token);
+    Optional<RefreshToken> findByToken(String token);
 
     List<RefreshToken> findAllByUser_Id(Long userId);
 
     List<RefreshToken> findAllByUser_IdAndRevokedFalse(Long userId);
+
+    List<RefreshToken> findAllByUser_IdAndRevokedFalseOrderByCreatedAtAsc(Long userId);
 
     @Modifying
     @Query("update RefreshToken r set r.revoked = true where r.user.id = :userId")
@@ -44,4 +52,6 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
                                     @Param("includeExpired") boolean includeExpired,
                                     @Param("now") Instant now,
                                     Pageable pageable);
+
+    Optional<RefreshToken> findFirstByUser_IdAndDeviceIdOrderByCreatedAtDesc(Long userId, String deviceId);
 }

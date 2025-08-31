@@ -2,6 +2,7 @@
 package com.agri.mapapp.auth;
 
 import com.agri.mapapp.common.PageResponse;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -10,17 +11,20 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import org.springframework.data.domain.*;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/auth")
+@RequestMapping({"/auth", "/api/auth"})
 @RequiredArgsConstructor
 public class AuthController {
 
@@ -67,6 +71,14 @@ public class AuthController {
         private String orgName; // OrganizationUnit.name
     }
 
+    @Getter @Setter @AllArgsConstructor
+    public static class AccessTokenResponse {
+        private String tokenType; // "Bearer"
+        private String accessToken;
+        private Instant accessExpiresAt;
+        private MeRes user;
+    }
+
     private String headerDeviceId(HttpServletRequest req, String fallback) {
         String v = req.getHeader("X-Device-Id");
         return (v != null && !v.isBlank()) ? v : fallback;
@@ -84,29 +96,87 @@ public class AuthController {
         int n = token.length();
         return n <= 8 ? token : token.substring(n - 8);
     }
+    private String cookie(HttpServletRequest req, String name) {
+        Cookie[] cs = req.getCookies();
+        if (cs == null) return null;
+        return Arrays.stream(cs)
+                .filter(c -> name.equals(c.getName()))
+                .map(Cookie::getValue)
+                .findFirst().orElse(null);
+    }
 
     @PostMapping("/login")
-    public ResponseEntity<TokenPair> login(@RequestBody LoginReq body, HttpServletRequest req) {
+    public ResponseEntity<AccessTokenResponse> login(@RequestBody LoginReq body, HttpServletRequest req) {
         String deviceId = headerDeviceId(req, body.getDeviceId());
         String ip = ipOf(req);
         String ua = uaOf(req);
-        TokenPair pair = sessions.loginIssueTokens(body.getUsername(), body.getPassword(), deviceId, ua, ip);
-        return ResponseEntity.ok(pair);
+        var tokens = sessions.loginIssueTokens(body.getUsername(), body.getPassword(), deviceId, ua, ip);
+
+        // Build refresh cookie
+        ResponseCookie rc = ResponseCookie.from("refreshToken", tokens.refreshToken())
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("None")
+                .path("/")
+                .maxAge(sessions.getRefreshExpSeconds())
+                .build();
+
+        AppUser u = tokens.user();
+        Long orgId = (u.getOrgUnit() != null ? u.getOrgUnit().getId() : null);
+        String orgName = (u.getOrgUnit() != null ? u.getOrgUnit().getName() : null);
+        MeRes me = new MeRes(u.getId(), u.getUsername(), u.getRole(), orgId, orgName);
+        AccessTokenResponse res = new AccessTokenResponse("Bearer", tokens.accessToken(), tokens.accessExpiresAt(), me);
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, rc.toString())
+                .body(res);
     }
 
     @PostMapping("/refresh")
-    public ResponseEntity<TokenPair> refresh(@RequestBody RefreshReq body, HttpServletRequest req) {
-        String deviceId = headerDeviceId(req, body.getDeviceId());
+    public ResponseEntity<AccessTokenResponse> refresh(HttpServletRequest req) {
+        String deviceId = headerDeviceId(req, null);
         String ip = ipOf(req);
         String ua = uaOf(req);
-        TokenPair pair = sessions.rotate(body.getRefreshToken(), deviceId, ua, ip);
-        return ResponseEntity.ok(pair);
+        String rt = cookie(req, "refreshToken");
+        if (rt == null || rt.isBlank()) {
+            throw new AuthException("REFRESH_INVALID", "Refresh cookie missing");
+        }
+
+        var tokens = sessions.rotate(rt, deviceId, ua, ip);
+
+        ResponseCookie rc = ResponseCookie.from("refreshToken", tokens.refreshToken())
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("None")
+                .path("/")
+                .maxAge(sessions.getRefreshExpSeconds())
+                .build();
+
+        AppUser u = tokens.user();
+        Long orgId = (u.getOrgUnit() != null ? u.getOrgUnit().getId() : null);
+        String orgName = (u.getOrgUnit() != null ? u.getOrgUnit().getName() : null);
+        MeRes me = new MeRes(u.getId(), u.getUsername(), u.getRole(), orgId, orgName);
+        AccessTokenResponse res = new AccessTokenResponse("Bearer", tokens.accessToken(), tokens.accessExpiresAt(), me);
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, rc.toString())
+                .body(res);
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<Map<String, Object>> logout(@RequestBody RefreshReq body) {
-        sessions.logout(body.getRefreshToken());
-        return ResponseEntity.ok(Map.of("ok", true));
+    public ResponseEntity<Map<String, Object>> logout(HttpServletRequest req) {
+        String rt = cookie(req, "refreshToken");
+        if (rt != null && !rt.isBlank()) sessions.logout(rt);
+        ResponseCookie rc = ResponseCookie.from("refreshToken", "")
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("None")
+                .path("/")
+                .maxAge(0)
+                .build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, rc.toString())
+                .body(Map.of("ok", true));
     }
 
     @GetMapping("/me")
@@ -120,10 +190,11 @@ public class AuthController {
 
     @PostMapping("/heartbeat")
     public ResponseEntity<Map<String, Object>> heartbeat(@AuthenticationPrincipal UserPrincipal principal,
-                                                         @RequestBody HeartbeatReq body) {
+                                                         @RequestBody Map<String, String> body) {
         if (principal == null) return ResponseEntity.status(401).build();
+        String deviceId = body != null ? body.get("deviceId") : null;
         AppUser u = userRepo.findByUsername(principal.getUsername()).orElseThrow();
-        sessions.heartbeat(u.getId(), body.getDeviceId());
+        sessions.heartbeat(u.getId(), deviceId);
         return ResponseEntity.ok(Map.of("ok", true));
     }
 
@@ -160,7 +231,7 @@ public class AuthController {
                         rt.getLastSeenAt(),
                         rt.getExpiresAt(),
                         rt.isRevoked(),
-                        tokenSuffix(rt.getToken())
+                        tokenSuffix(rt.getTokenHash() != null ? rt.getTokenHash() : rt.getToken())
                 ))
                 .toList();
 

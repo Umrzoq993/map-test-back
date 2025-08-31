@@ -1,5 +1,6 @@
 package com.agri.mapapp.common;
 
+import com.agri.mapapp.auth.AuthException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -29,6 +30,15 @@ public class GlobalExceptionHandler {
             body.put("details", details);
         }
         return new ResponseEntity<>(body, new HttpHeaders(), status);
+    }
+
+    // ✅ Auth xatoliklari uchun
+    @ExceptionHandler(AuthException.class)
+    public ResponseEntity<Object> handleAuth(AuthException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("code", ex.getCode());
+        body.put("message", ex.getMessage());
+        return new ResponseEntity<>(body, new HttpHeaders(), HttpStatus.UNAUTHORIZED);
     }
 
     // ✅ Entity topilmasa

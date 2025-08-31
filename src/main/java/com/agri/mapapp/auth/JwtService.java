@@ -18,7 +18,7 @@ public class JwtService {
 
     public JwtService(
             @Value("${app.jwt.secret}") String secret,
-            @Value("${app.jwt.access-exp-minutes:120}") long accessExpMinutes, // default 120 daqiqa
+            @Value("${app.jwt.access-exp-minutes:5}") long accessExpMinutes, // default 5 daqiqa
             @Value("${app.jwt.issuer:mapapp}") String issuer
     ) {
         byte[] raw = secret.getBytes(StandardCharsets.UTF_8);
@@ -36,11 +36,16 @@ public class JwtService {
     }
 
     public String generateAccessToken(String username, Role role, Long orgId) {
+        return generateAccessToken(username, role, orgId, null);
+    }
+
+    public String generateAccessToken(String username, Role role, Long orgId, String deviceId) {
         long now = System.currentTimeMillis();
 
         Map<String, Object> claims = new HashMap<>();
         claims.put("role", role != null ? role.name() : "USER");
         if (orgId != null) claims.put("orgId", orgId);
+        if (deviceId != null && !deviceId.isBlank()) claims.put("deviceId", deviceId);
 
         // Spring Security uchun authorities (ROLE_ prefiks bilan)
         String r = role != null ? role.name() : "USER";

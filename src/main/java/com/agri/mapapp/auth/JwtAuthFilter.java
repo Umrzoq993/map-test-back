@@ -28,8 +28,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private static final AntPathMatcher PM = new AntPathMatcher();
 
     private boolean isWhitelisted(String path) {
-        // faqat quyidagi yo'llarni whitelist qilamiz (boshqa /api/auth/** emas!)
-        return PM.match("/api/auth/login", path) ||
+        // faqat quyidagi yo'llarni whitelist qilamiz
+        return PM.match("/auth/login", path) ||
+                PM.match("/auth/refresh", path) ||
+                PM.match("/auth/logout", path) ||
+                PM.match("/api/auth/login", path) ||
                 PM.match("/api/auth/refresh", path) ||
                 PM.match("/api/auth/logout", path) ||
                 PM.match("/swagger-ui/**", path) ||
@@ -75,7 +78,6 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
                     // Agar xohlasangiz, DB'dan ham tekshirish:
                     var ud = (UserPrincipal) uds.loadUserByUsername(username);
-                    // Token authorities ustuvor; DB dagi rollarni qo'shib yuborish ham mumkin:
                     if (tokenAuthorities.isEmpty()) {
                         tokenAuthorities = ud.getAuthorities().stream()
                                 .map(a -> new SimpleGrantedAuthority(a.getAuthority()))
