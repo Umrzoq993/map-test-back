@@ -59,12 +59,12 @@ public class UserService {
         AppUser u = users.findById(id).orElseThrow();
         if (req.getRole() != null) u.setRole(req.getRole());
 
-        u.setFullName(req.getFullName());
-        u.setPosition(req.getPosition());
-        u.setTitle(req.getTitle());
-        u.setPhone(req.getPhone());
-        u.setAvatarUrl(req.getAvatarUrl());
-        u.setDepartment(req.getDepartment());
+        if (req.getFullName() != null) u.setFullName(req.getFullName());
+        if (req.getPosition() != null) u.setPosition(req.getPosition());
+        if (req.getTitle() != null) u.setTitle(req.getTitle());
+        if (req.getPhone() != null) u.setPhone(req.getPhone());
+        if (req.getAvatarUrl() != null) u.setAvatarUrl(req.getAvatarUrl());
+        if (req.getDepartment() != null) u.setDepartment(req.getDepartment());
 
         if (req.getOrgId() != null && orgUnitRepo != null) {
             u.setOrgUnit(orgUnitRepo.findById(req.getOrgId()).orElse(null));
@@ -126,6 +126,7 @@ public class UserService {
                 .phone(u.getPhone())
                 .avatarUrl(u.getAvatarUrl())
                 .orgId(u.getOrgUnit() != null ? u.getOrgUnit().getId() : null)
+                .orgName(u.getOrgUnit() != null ? u.getOrgUnit().getName() : null)
                 .department(u.getDepartment())
                 .build();
     }

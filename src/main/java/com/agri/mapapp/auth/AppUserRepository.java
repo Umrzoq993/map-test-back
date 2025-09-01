@@ -11,8 +11,22 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long>, JpaSpec
 
     Optional<AppUser> findByUsername(String username);
 
-    @Query("""
+    @Query(value = """
         select u from AppUser u
+        left join fetch u.orgUnit ou
+        where (:q is null or
+               lower(u.username) like :q or
+               lower(u.fullName) like :q or
+               lower(u.position) like :q or
+               lower(u.title) like :q or
+               lower(u.phone) like :q)
+          and (:role is null or u.role = :role)
+          and (:status is null or u.status = :status)
+          and (:orgId is null or (u.orgUnit is not null and u.orgUnit.id = :orgId))
+          and (:dept is null or u.department = :dept)
+    """,
+    countQuery = """
+        select count(u) from AppUser u
         where (:q is null or
                lower(u.username) like :q or
                lower(u.fullName) like :q or

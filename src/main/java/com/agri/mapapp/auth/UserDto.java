@@ -16,6 +16,7 @@ class UserRes {
     private String avatarUrl;
 
     private Long orgId;        // OrganizationUnit.id
+    private String orgName;    // OrganizationUnit.name
     private String department;
 }
 
