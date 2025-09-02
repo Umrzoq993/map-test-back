@@ -49,4 +49,5 @@ public class OverviewRes {
     private String to;          // ISO (if custom)
 
     private List<OrgAgg> orgs;  // legacy org count
+    private Long orgFilter;     // applied single org filter (optional)
 }

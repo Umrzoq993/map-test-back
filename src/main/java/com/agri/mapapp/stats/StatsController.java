@@ -34,11 +34,29 @@ public class StatsController {
             @RequestParam(required = false) Integer quarter,                      // 1..4 (range=quarter bo'lsa)
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
-            @RequestParam(required = false) String types // CSV of FacilityType
+            @RequestParam(required = false) String types, // CSV of FacilityType
+            @RequestParam(required = false) Long orgId    // optional single org filter
     ) {
         Set<Long> allowedOrgIds = resolveAllowedScope(auth);
+        if (orgId != null) {
+            // subtree of requested org
+            Set<Long> requestedSubtree = accessService.subtreeOf(orgId);
+            if (allowedOrgIds == null) { // ADMIN -> just use subtree (may be empty if org not found)
+                allowedOrgIds = requestedSubtree;
+            } else {
+                if (allowedOrgIds.contains(orgId)) {
+                    // narrow to intersection to be extra safe (though subtree should be subset)
+                    requestedSubtree.retainAll(allowedOrgIds);
+                    allowedOrgIds = requestedSubtree;
+                } else {
+                    allowedOrgIds = Collections.emptySet();
+                }
+            }
+        }
         List<FacilityType> typeList = parseTypes(types);
-        return statsService.overviewAdvanced(allowedOrgIds, year, typeList, range, quarter, from, to);
+        OverviewRes res = statsService.overviewAdvanced(allowedOrgIds, year, typeList, range, quarter, from, to);
+        if (orgId != null) res.setOrgFilter(orgId);
+        return res;
     }
 
     @GetMapping(value = "/export", produces = "text/csv")
@@ -49,11 +67,24 @@ public class StatsController {
             @RequestParam(required = false) Integer quarter,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
-            @RequestParam(required = false) String types
+            @RequestParam(required = false) String types,
+            @RequestParam(required = false) Long orgId
     ) {
         Set<Long> allowedOrgIds = resolveAllowedScope(auth);
+        if (orgId != null) {
+            Set<Long> requestedSubtree = accessService.subtreeOf(orgId);
+            if (allowedOrgIds == null) {
+                allowedOrgIds = requestedSubtree;
+            } else {
+                if (allowedOrgIds.contains(orgId)) {
+                    requestedSubtree.retainAll(allowedOrgIds);
+                    allowedOrgIds = requestedSubtree;
+                } else {
+                    allowedOrgIds = Collections.emptySet();
+                }
+            }
+        }
         List<FacilityType> typeList = parseTypes(types);
-
         String csv = statsService.exportCsv(allowedOrgIds, year, typeList, range, quarter, from, to);
         byte[] body = csv.getBytes(StandardCharsets.UTF_8);
         return ResponseEntity.ok()

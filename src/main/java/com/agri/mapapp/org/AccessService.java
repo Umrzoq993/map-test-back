@@ -19,13 +19,21 @@ public class AccessService {
         if (up.getRole() == Role.ADMIN) return null; // null -> cheklanmagan (ADMIN)
         Long rootId = up.getOrgId();
         if (rootId == null) return Set.of(); // org biriktirilmagan USER
-        // barcha orglarni olib, subtree ni hisoblaymiz (oddiy DFS)
+        return subtreeOf(rootId);
+    }
+
+    /** Berilgan orgId (agar mavjud bo‘lsa) va barcha avlodlari ID’lari to‘plami. Topilmasa -> bo‘sh set. */
+    public Set<Long> subtreeOf(Long rootId) {
+        if (rootId == null) return Set.of();
         List<OrganizationUnit> all = repo.findAll();
+        boolean exists = false;
         Map<Long, List<Long>> children = new HashMap<>();
         for (OrganizationUnit u : all) {
+            if (Objects.equals(u.getId(), rootId)) exists = true;
             Long pid = (u.getParent() != null) ? u.getParent().getId() : null;
             if (pid != null) children.computeIfAbsent(pid, k -> new ArrayList<>()).add(u.getId());
         }
+        if (!exists) return Set.of();
         Set<Long> out = new HashSet<>();
         Deque<Long> st = new ArrayDeque<>();
         st.push(rootId); out.add(rootId);
