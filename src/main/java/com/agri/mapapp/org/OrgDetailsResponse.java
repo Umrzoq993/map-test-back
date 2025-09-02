@@ -36,6 +36,8 @@ public class OrgDetailsResponse {
     @Builder.Default
     private List<OrgLocateResponse.FacilityDto> facilities = List.of();
 
+    // (Images moved to facility-level API: /api/facilities/{id}/images)
+
     // --- Nested DTOs ---
 
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
