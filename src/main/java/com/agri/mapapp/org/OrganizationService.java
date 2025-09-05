@@ -255,7 +255,7 @@ public class OrganizationService {
     }
 
     @Transactional
-    public OrganizationUnit updateOrg(Long id, String name, Double lat, Double lng, Integer zoom, Integer sortOrder) {
+    public OrganizationUnit updateOrg(Long id, String name, Double lat, Double lng, Integer zoom, Integer sortOrder, String code) {
         OrganizationUnit u = getOr404(id);
         if (name != null) {
             String nm = name.trim();
@@ -265,6 +265,25 @@ public class OrganizationService {
         if (lat != null) u.setLat(lat);
         if (lng != null) u.setLng(lng);
         if (zoom != null) u.setZoom(zoom);
+
+        // --- code update qo'llab-quvvatlash ---
+        if (code != null) {
+            String c = code.trim();
+            if (c.isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "code cannot be blank");
+            if (c.length() > 32) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "code too long (max 32)");
+            // optional pattern (faqat harf/raqam/-,_.)
+            if (!c.matches("[A-Za-z0-9_.-]+")) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "code format invalid");
+            }
+            if (!c.equals(u.getCode())) {
+                repo.findByCode(c).ifPresent(other -> {
+                    if (!Objects.equals(other.getId(), u.getId())) {
+                        throw new ResponseStatusException(HttpStatus.CONFLICT, "code already exists: " + c);
+                    }
+                });
+                u.setCode(c);
+            }
+        }
 
         if (sortOrder != null) {
             OrganizationUnit parent = u.getParent();

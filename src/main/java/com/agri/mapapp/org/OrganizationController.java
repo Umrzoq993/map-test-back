@@ -111,7 +111,7 @@ public class OrganizationController {
         if (!access.canAccessOrg(auth, id) && ((UserPrincipal)auth.getPrincipal()).getRole()!=Role.ADMIN) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
-        var u = service.updateOrg(id, req.getName(), req.getLat(), req.getLng(), req.getZoom(), req.getSortOrder());
+        var u = service.updateOrg(id, req.getName(), req.getLat(), req.getLng(), req.getZoom(), req.getSortOrder(), req.getCode());
         var res = OrgFlatRes.of(u, u.getParent()!=null? u.getParent().getName(): null, 0, false);
         return ResponseEntity.ok(res);
     }
@@ -147,7 +147,7 @@ public class OrganizationController {
     }
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor
     public static class UpdateOrgReq {
-        private String name; private Double lat; private Double lng; private Integer zoom; private Integer sortOrder;
+        private String name; private Double lat; private Double lng; private Integer zoom; private Integer sortOrder; private String code; // code patch support
     }
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor
     public static class MoveOrgReq {
