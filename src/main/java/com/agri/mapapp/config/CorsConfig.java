@@ -9,6 +9,8 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Configuration
 @ConditionalOnProperty(name = "app.cors.enabled", havingValue = "true", matchIfMissing = true)
@@ -33,20 +35,28 @@ public class CorsConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        Arrays.stream(allowedOriginsCsv.split(","))
-                .map(String::trim).forEach(config::addAllowedOrigin);
+        List<String> origins = Arrays.stream(allowedOriginsCsv.split(","))
+                .map(String::trim).filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
+
+        // Agar "null" yoki "*" kerak bo'lsa, AllowedOriginPatterns ishlatiladi.
+        // Hozir biz aniq domenlar bilan ishlaymiz:
+        origins.forEach(config::addAllowedOrigin);
 
         Arrays.stream(allowedMethodsCsv.split(","))
-                .map(String::trim).forEach(config::addAllowedMethod);
+                .map(String::trim).filter(s -> !s.isEmpty())
+                .forEach(config::addAllowedMethod);
 
         Arrays.stream(allowedHeadersCsv.split(","))
-                .map(String::trim).forEach(config::addAllowedHeader);
+                .map(String::trim).filter(s -> !s.isEmpty())
+                .forEach(config::addAllowedHeader);
 
         Arrays.stream(exposedHeadersCsv.split(","))
-                .map(String::trim).forEach(config::addExposedHeader);
+                .map(String::trim).filter(s -> !s.isEmpty())
+                .forEach(config::addExposedHeader);
 
         config.setAllowCredentials(allowCredentials);
-        config.setMaxAge(3600L);
+        config.setMaxAge(3600L); // 1 soat preflight cache
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
 import java.util.Locale;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -20,6 +21,7 @@ public class UserService {
     private final PasswordEncoder encoder;
     private final OrganizationUnitRepository orgUnitRepo; // OrganizationUnit
     private final AuditService audit;
+    private final OnlineUserTracker online;
 
     public Page<UserRes> search(String q, Role role, UserStatus status, Long orgId, String dept, Pageable pageable) {
         // q ni oldindan lower + wildcard bilan tayyorlaymiz (masalan: "%ali%")
@@ -28,6 +30,14 @@ public class UserService {
                 : "%" + q.toLowerCase(Locale.ROOT) + "%";
 
         return users.search(qPattern, role, status, orgId, dept, pageable).map(this::toRes);
+    }
+
+    public Page<UserRes> online(Pageable pageable) {
+        Set<Long> ids = online.getOnlineUserIds();
+        if (ids == null || ids.isEmpty()) {
+            return Page.empty(pageable);
+        }
+        return users.findByIdIn(ids, pageable).map(this::toRes);
     }
 
     @Transactional
@@ -108,7 +118,7 @@ public class UserService {
 
     private String genTempPassword() {
         String alpha = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789@$!%*?#&";
-        SecureRandom r = new SecureRandom();
+        java.security.SecureRandom r = new java.security.SecureRandom();
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < 12; i++) sb.append(alpha.charAt(r.nextInt(alpha.length())));
         return sb.toString();

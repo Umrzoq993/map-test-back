@@ -34,6 +34,19 @@ public class UserController {
         ));
     }
 
+    @GetMapping("/online")
+    public ResponseEntity<PageResponse<UserRes>> online(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "id,desc") String sort
+    ) {
+        Pageable pageable = PageRequest.of(page, size, parseSort(sort));
+        Page<UserRes> pg = users.online(pageable);
+        return ResponseEntity.ok(new PageResponse<>(
+                pg.getContent(), pg.getNumber(), pg.getSize(), pg.getTotalElements(), pg.getTotalPages(), pg.isLast()
+        ));
+    }
+
     @PostMapping
     public ResponseEntity<UserRes> create(@RequestBody CreateUserReq req, HttpServletRequest r) {
         return ResponseEntity.ok(users.create(req, device(r), ip(r), ua(r)));

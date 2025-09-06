@@ -5,6 +5,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.Optional;
 
 public interface AppUserRepository extends JpaRepository<AppUser, Long>, JpaSpecificationExecutor<AppUser> {
@@ -44,4 +45,6 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long>, JpaSpec
                          @Param("orgId") Long orgId,
                          @Param("dept") String department,
                          Pageable pageable);
+
+    Page<AppUser> findByIdIn(Collection<Long> ids, Pageable pageable);
 }
