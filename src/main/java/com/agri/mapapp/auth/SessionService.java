@@ -166,9 +166,9 @@ public class SessionService {
             throw new AuthException("REFRESH_INVALID", "Invalid refresh token");
         }
 
-        // Replay detektsiya: agar oldindan revoke qilingan bo'lsa, hammasini bekor qilish
+        // Replay detektsiya: agar oldindan revoke qilingan bo'lsa — bu qayta foydalanish,
+        // lekin boshqa aktiv sessiyalarni bekor qilmaymiz (gonkalarni yengil переносим)
         if (old.isRevoked()) {
-            rtRepo.revokeAllByUserId(old.getUser().getId());
             audit.log("REFRESH_REPLAY", old.getUser(), deviceId, ip, userAgent);
             throw new AuthException("REFRESH_REPLAY", "Refresh token replay detected");
         }

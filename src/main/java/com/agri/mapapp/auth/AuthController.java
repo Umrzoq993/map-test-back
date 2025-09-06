@@ -1,4 +1,3 @@
-// src/main/java/com/agri/mapapp/auth/AuthController.java
 package com.agri.mapapp.auth;
 
 import com.agri.mapapp.common.PageResponse;
@@ -10,7 +9,11 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
-import org.springframework.data.domain.*;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +35,14 @@ public class AuthController {
     private final OnlineUserTracker online;
     private final AppUserRepository userRepo;
 
+    /** Cookie nomi (default: refreshToken). Kerak bo‘lsa prod’da o‘zgartirasiz. */
+    @Value("${app.security.cookie.name:refreshToken}")
+    private String refreshCookieName;
+
+    /** Cookie domain; bo‘sh bo‘lsa host-only */
+    @Value("${app.security.cookie.domain:}")
+    private String cookieDomain;
+
     @Getter @Setter
     public static class LoginReq {
         @NotBlank private String username;
@@ -41,7 +52,7 @@ public class AuthController {
 
     @Getter @Setter
     public static class RefreshReq {
-        @NotBlank private String refreshToken;
+        private String refreshToken; // @NotBlank olib tashlandi: body optional
         private String deviceId;
     }
 
@@ -67,8 +78,8 @@ public class AuthController {
         private Long id;
         private String username;
         private Role role;
-        private Long orgId;     // OrganizationUnit.id
-        private String orgName; // OrganizationUnit.name
+        private Long orgId;
+        private String orgName;
     }
 
     @Getter @Setter @AllArgsConstructor
@@ -96,13 +107,32 @@ public class AuthController {
         int n = token.length();
         return n <= 8 ? token : token.substring(n - 8);
     }
-    private String cookie(HttpServletRequest req, String name) {
+
+    /** Bir nechta nom bo‘yicha cookie qidiramiz (migratsiya/fallback uchun) */
+    private String cookie(HttpServletRequest req, String... names) {
         Cookie[] cs = req.getCookies();
         if (cs == null) return null;
-        return Arrays.stream(cs)
-                .filter(c -> name.equals(c.getName()))
-                .map(Cookie::getValue)
-                .findFirst().orElse(null);
+        for (String name : names) {
+            for (Cookie c : cs) {
+                if (name.equals(c.getName())) {
+                    return c.getValue();
+                }
+            }
+        }
+        return null;
+    }
+
+    private ResponseCookie buildRefreshCookie(String value, long maxAgeSeconds) {
+        ResponseCookie.ResponseCookieBuilder b = ResponseCookie.from(refreshCookieName, value)
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("None")
+                .path("/")
+                .maxAge(maxAgeSeconds);
+        if (cookieDomain != null && !cookieDomain.isBlank()) {
+            b.domain(cookieDomain);
+        }
+        return b.build();
     }
 
     @PostMapping("/login")
@@ -113,13 +143,7 @@ public class AuthController {
         var tokens = sessions.loginIssueTokens(body.getUsername(), body.getPassword(), deviceId, ua, ip);
 
         // Build refresh cookie
-        ResponseCookie rc = ResponseCookie.from("refreshToken", tokens.refreshToken())
-                .httpOnly(true)
-                .secure(true)
-                .sameSite("None")
-                .path("/")
-                .maxAge(sessions.getRefreshExpSeconds())
-                .build();
+        ResponseCookie rc = buildRefreshCookie(tokens.refreshToken(), sessions.getRefreshExpSeconds());
 
         AppUser u = tokens.user();
         Long orgId = (u.getOrgUnit() != null ? u.getOrgUnit().getId() : null);
@@ -133,24 +157,45 @@ public class AuthController {
     }
 
     @PostMapping("/refresh")
-    public ResponseEntity<AccessTokenResponse> refresh(HttpServletRequest req) {
+    public ResponseEntity<AccessTokenResponse> refresh(HttpServletRequest req,
+                                                       @RequestBody(required = false) RefreshReq body,
+                                                       @RequestParam(value = "refreshToken", required = false) String rtParam) {
         String deviceId = headerDeviceId(req, null);
         String ip = ipOf(req);
         String ua = uaOf(req);
-        String rt = cookie(req, "refreshToken");
+
+        // 1) Cookie — hozirgi nom + muqobil nomlar
+        String rt = cookie(req, refreshCookieName, "refresh", "rt", "refreshToken");
+
+        // 2) Authorization: Bearer <token> yoki Refresh <token>
+        if (rt == null || rt.isBlank()) {
+            String auth = req.getHeader(HttpHeaders.AUTHORIZATION);
+            if (auth != null && !auth.isBlank()) {
+                if (auth.startsWith("Bearer ")) {
+                    rt = auth.substring(7).trim();
+                } else if (auth.startsWith("Refresh ")) {
+                    rt = auth.substring(8).trim();
+                }
+            }
+        }
+
+        // 3) Body
+        if ((rt == null || rt.isBlank()) && body != null && body.getRefreshToken() != null) {
+            rt = body.getRefreshToken().trim();
+        }
+
+        // 4) Query param
+        if ((rt == null || rt.isBlank()) && rtParam != null) {
+            rt = rtParam.trim();
+        }
+
         if (rt == null || rt.isBlank()) {
             throw new AuthException("REFRESH_INVALID", "Refresh cookie missing");
         }
 
         var tokens = sessions.rotate(rt, deviceId, ua, ip);
 
-        ResponseCookie rc = ResponseCookie.from("refreshToken", tokens.refreshToken())
-                .httpOnly(true)
-                .secure(true)
-                .sameSite("None")
-                .path("/")
-                .maxAge(sessions.getRefreshExpSeconds())
-                .build();
+        ResponseCookie rc = buildRefreshCookie(tokens.refreshToken(), sessions.getRefreshExpSeconds());
 
         AppUser u = tokens.user();
         Long orgId = (u.getOrgUnit() != null ? u.getOrgUnit().getId() : null);
@@ -165,15 +210,9 @@ public class AuthController {
 
     @PostMapping("/logout")
     public ResponseEntity<Map<String, Object>> logout(HttpServletRequest req) {
-        String rt = cookie(req, "refreshToken");
+        String rt = cookie(req, refreshCookieName, "refresh", "rt", "refreshToken");
         if (rt != null && !rt.isBlank()) sessions.logout(rt);
-        ResponseCookie rc = ResponseCookie.from("refreshToken", "")
-                .httpOnly(true)
-                .secure(true)
-                .sameSite("None")
-                .path("/")
-                .maxAge(0)
-                .build();
+        ResponseCookie rc = buildRefreshCookie("", 0);
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, rc.toString())
                 .body(Map.of("ok", true));
@@ -198,10 +237,7 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("ok", true));
     }
 
-    /**
-     * ✅ Paged sessions API
-     * GET /api/auth/sessions?includeRevoked=true&includeExpired=false&page=0&size=10&sort=lastSeenAt,desc
-     */
+    /** ✅ Paged sessions API */
     @GetMapping("/sessions")
     public ResponseEntity<PageResponse<SessionView>> mySessions(
             @AuthenticationPrincipal UserPrincipal principal,
@@ -268,7 +304,6 @@ public class AuthController {
     }
 
     private Sort parseSort(String sort) {
-        // format: "field,dir" yoki "field" (default: lastSeenAt desc)
         if (sort == null || sort.isBlank()) return Sort.by(Sort.Order.desc("lastSeenAt"));
         String[] parts = sort.split(",");
         String field = parts[0].trim();
